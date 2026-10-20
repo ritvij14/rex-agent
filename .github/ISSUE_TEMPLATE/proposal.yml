@@ -1,0 +1,11 @@
+name: Design proposal
+description: Discuss a bounded change before implementation.
+title: "Proposal: "
+body:
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Problem and proposed change
+      description: Include scope, alternatives, privacy boundaries, and a verifiable completion check. Do not include private examples.
+    validations:
+      required: true

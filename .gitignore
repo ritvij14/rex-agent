@@ -1,0 +1,52 @@
+# Local-only notes and previous work; never publish this directory.
+.local/
+private/
+
+# Credentials and machine configuration.
+.env
+.env.*
+!*.env.example
+!.env.example
+**/auth.json
+**/models.json
+**/settings.local.json
+**/*.pem
+**/*.key
+**/credentials.json
+**/service-account*.json
+
+# Agent state and recordings.
+.rex/
+.pi/
+.hermes/
+data/
+memories/
+sessions/
+transcripts/
+*.jsonl
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Dependencies, builds, caches, and local tools.
+node_modules/
+dist/
+coverage/
+.venv/
+__pycache__/
+*.pyc
+.tools/
+.DS_Store
+*.bak
+*.orig
+
+# Previous locations remain blocked even if recreated.
+/plugins/
+/infra/
+chatgpt-plan.md
+detailed-diagram.md
+docs/*research*.md
+docs/live-memory-gbrain-anythingllm.md
+docs/rex-pi-direction-conversation.md
+docs/memory-site/

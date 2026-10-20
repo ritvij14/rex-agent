@@ -1,0 +1,30 @@
+{
+  "name": "rex-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A memory-first agent system built incrementally on Pi.",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "setup": "node --import tsx scripts/setup.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "privacy:check": "node --import tsx scripts/repo-check.ts --worktree --secrets",
+    "format": "node --import tsx scripts/format.ts --write",
+    "format:check": "node --import tsx scripts/format.ts --check",
+    "check": "npm run typecheck && npm test && npm run privacy:check && npm run format:check",
+    "release:check": "node --import tsx scripts/repo-check.ts --history --secrets"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  },
+  "license": "MIT"
+}

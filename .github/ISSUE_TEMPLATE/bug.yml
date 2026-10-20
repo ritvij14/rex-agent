@@ -1,0 +1,21 @@
+name: Bug report
+description: Reproduce a problem with invented data only.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach credentials, real memories, account IDs, private URLs, or screenshots of personal data. Use docs/infra/security.md for private reports."
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Exact tool versions, safe steps, expected result, and actual result. No personal logs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy review
+      options:
+        - label: This report contains only public-safe, invented data.
+          required: true
