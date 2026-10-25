@@ -34,5 +34,7 @@ jobs:
         run: npm run setup
       - name: Run no-emit typecheck, tests, privacy checks, and formatting
         run: npm run check
+      - name: Verify sandbox isolation with a synthetic model endpoint
+        run: npm run sandbox -- check
       - name: Check all fetched commit history before release
         run: npm run release:check

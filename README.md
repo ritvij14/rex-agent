@@ -2,7 +2,7 @@
 
 A memory-first personal agent system, built incrementally on Pi's core libraries.
 
-**Status: repository foundation.** This is not a ready-to-run assistant. Router, profiles, memory, sandboxing, and durable execution are planned, not implemented. The previous Hermes plugin is not part of the public source tree.
+**Status: repository foundation, terminal sandbox, and minimal Pi profiles.** This is not a ready-to-run assistant. The sandbox includes explicit profile-selected Pi SDK runs, separate histories, tool whitelist/blacklist enforcement, and draft creation with operator approval. Synthetic container acceptance and separately approved live GLM profile checks have passed: coding wrote a synthetic file, research read it, and profile-builder produced an inactive draft. Other model/API combinations require their own acceptance. Router, model overrides/fallback, memory, and durable execution are not implemented. The previous Hermes plugin is not part of the public source tree.
 
 ## What belongs here
 
@@ -32,12 +32,30 @@ Scripts and tests run directly from `.ts` files through pinned `tsx`; Node's bui
 
 A working-tree pass does **not** mean old Git history is safe to publish. The release check is separate and intentionally rejects retained private history.
 
+## Profile core
+
+`@rex/profiles` resolves and carries an explicit profile through one asynchronous turn without changing the process environment. `@rex/pi-profiles` runs that turn through Pi with its own instructions, model, tools and history. Three minimal profiles—`coding`, `research`, and `profile-builder`—use GLM 5.3 Flash Cloud. Tool rules allow exact names or `*`, with blacklist precedence. This is not filesystem isolation between profiles. See [the profile contract and limits](docs/features/profiles.md).
+
+With the authenticated sandbox running, execute a prompt containing its selector:
+
+```sh
+npm run sandbox -- rex $'profile: research\nList the local workspace files.'
+```
+
+Use `npm run sandbox -- refresh` to install rebuilt packages without restarting the authenticated gateway or deleting state. Drafts require a separate `review-profile` / digest-bound `approve-profile` operator action; they never activate automatically. Live runs use the existing model allowance. Account-free tests run through `npm run check` and `npm run sandbox -- check`.
+
+## Terminal sandbox
+
+With Docker Desktop running on macOS, `npm run sandbox -- start` starts a separate Pi environment with an empty workspace and private Docker-managed state. It exposes no application ports and mounts no host folders. Its only external connection is an inference-only forwarding service to the existing local CLI Proxy API; no provider accounts or host Pi settings are copied.
+
+Run `npm run sandbox -- shell` to enter the workspace. Real Pi model use requires operator-supplied inference authentication and an explicit model configuration. `npm run sandbox -- check` verifies the container boundary and Pi inference against a synthetic endpoint without credentials or model quota. See [terminal sandbox operations and limits](docs/infra/terminal-sandbox.md).
+
 ## Layout
 
 | Path | Responsibility |
 | --- | --- |
-| `packages/` | Future TypeScript core libraries and Pi-specific adapters |
-| `lab/` | Future reproducible sandbox definitions; no real credentials or state |
+| `packages/` | Pi-independent profile core and a separate Pi SDK adapter |
+| `lab/` | Terminal-only Pi sandbox definitions and synthetic checks; no real credentials or state |
 | `scripts/`, `tests/` | Repository privacy tooling and regression tests |
 | `docs/`, `.github/`, `.githooks/` | Design, collaboration, and automated checks |
 
@@ -45,6 +63,6 @@ Read [AGENTS.md](AGENTS.md) for the always-on architecture and building-in-publi
 
 ## Security and license
 
-Report private information or vulnerabilities using [security documentation](docs/infra/security.md), not a public issue. A sandbox has not been built yet; do not treat this repository or a normal Pi session as isolated from the host.
+Report private information or vulnerabilities using [security documentation](docs/infra/security.md), not a public issue. The terminal experiment's boundary applies only to processes launched inside it; this repository and normal host Pi sessions are not isolated from the host. Live model compatibility is not established by synthetic tests.
 
 Licensed under the [MIT License](LICENSE).

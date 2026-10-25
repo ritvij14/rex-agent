@@ -1,0 +1,95 @@
+x-runtime: &runtime
+  image: rex-terminal:local
+  pull_policy: never
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  init: true
+  logging:
+    driver: none
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000
+
+services:
+  gateway:
+    <<: *runtime
+    command: [gateway]
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 64
+    environment:
+      REX_PROXY_ORIGIN: http://host.docker.internal:8317
+      REX_PROXY_API_KEY: ${REX_PROXY_API_KEY:-}
+    volumes:
+      - inference-socket:/run/rex
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "require('node:fs').accessSync('/run/rex/inference.sock')",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+  sandbox:
+    <<: *runtime
+    build:
+      context: .
+      additional_contexts:
+        profile-core: ../../packages/profiles
+        pi-profiles: ../../packages/pi-profiles
+    command: [sandbox]
+    network_mode: none
+    cpus: 2
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 128
+    depends_on:
+      gateway:
+        condition: service_healthy
+    volumes:
+      - workspace:/workspace
+      - agent-state:/state
+      - profile-definitions:/profiles:ro
+      - profile-proposals:/proposals
+      - inference-socket:/run/rex:ro
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:8317/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  profile-admin:
+    <<: *runtime
+    profiles: [operator]
+    user: "0:0"
+    network_mode: none
+    entrypoint:
+      - node
+      - --import
+      - /opt/rex/node_modules/tsx/dist/loader.mjs
+      - /opt/rex/packages/pi-profiles/src/operator.ts
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 64
+    volumes:
+      - profile-definitions:/profiles
+      - profile-proposals:/proposals:ro
+
+volumes:
+  workspace:
+  agent-state:
+  profile-definitions:
+  profile-proposals:
+  inference-socket:

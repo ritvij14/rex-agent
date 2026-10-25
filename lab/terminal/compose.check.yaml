@@ -1,0 +1,36 @@
+services:
+  gateway:
+    environment:
+      REX_PROXY_ORIGIN: http://fixture:8317
+      REX_PROXY_API_KEY: ""
+    depends_on:
+      fixture:
+        condition: service_healthy
+  fixture:
+    image: rex-terminal:local
+    pull_policy: never
+    command: [fixture]
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 64
+    logging:
+      driver: none
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:8317/v1/models').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 15

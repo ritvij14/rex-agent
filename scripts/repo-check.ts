@@ -143,9 +143,16 @@ export function pathProblems(name: string): string[] {
   if (/[\s\p{Cc}]/u.test(name)) {
     issues.push("whitespace or control character in path");
   }
+  const skillDocument =
+    name === ".agents/AGENTS.md" ||
+    name === ".agents/pstack-license.txt" ||
+    /^\.agents\/skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:SKILL\.md|(?:features|references)\/[a-z0-9]+(?:-[a-z0-9]+)*\.md)$/.test(
+      name,
+    );
   if (
-    (parts.length === 1 && !ROOT_FILES.has(name)) ||
-    (parts.length > 1 && !PUBLIC_DIRS.has(parts[0]!))
+    !skillDocument &&
+    ((parts.length === 1 && !ROOT_FILES.has(name)) ||
+      (parts.length > 1 && !PUBLIC_DIRS.has(parts[0]!)))
   ) {
     issues.push("path not approved for publication");
   }
@@ -174,7 +181,11 @@ export function pathProblems(name: string): string[] {
   return issues;
 }
 
-export function textProblems(data: Buffer, terms: string[] = []): string[] {
+export function textProblems(
+  data: Buffer,
+  terms: string[] = [],
+  options: { allowEmails?: boolean } = {},
+): string[] {
   if (data.length > MAX_BYTES) return ["file exceeds public review size limit"];
   let text: string;
   try {
@@ -190,12 +201,14 @@ export function textProblems(data: Buffer, terms: string[] = []): string[] {
   if (/(?<![\w])\d{17,20}(?![\w])/.test(text)) {
     issues.push("possible chat/account ID; use named synthetic fixtures");
   }
-  for (const match of text.matchAll(
-    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
-  )) {
-    if (!PUBLIC_EMAIL_DOMAINS.has(match[0].split("@")[1]!.toLowerCase())) {
-      issues.push("non-example email address");
-      break;
+  if (!options.allowEmails) {
+    for (const match of text.matchAll(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
+    )) {
+      if (!PUBLIC_EMAIL_DOMAINS.has(match[0].split("@")[1]!.toLowerCase())) {
+        issues.push("non-example email address");
+        break;
+      }
     }
   }
   if (terms.some((term) => text.toLowerCase().includes(term.toLowerCase()))) {
@@ -380,7 +393,9 @@ export function history(root: string, secrets = false): boolean {
       return false;
     }
     const message = git(root, "show", "-s", "--format=%B", commit);
-    if (textProblems(message, privateTerms(root)).length) {
+    if (
+      textProblems(message, privateTerms(root), { allowEmails: true }).length
+    ) {
       console.log(
         "BLOCKED: private content in commit message (content suppressed).",
       );

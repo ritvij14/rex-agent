@@ -38,6 +38,52 @@ test("blocks personal emails, home paths, and chat IDs", () => {
   }
 });
 
+test("commit-message mode allows emails without changing file-content privacy", () => {
+  const messages = [
+    "Contact " + "alice" + "@" + "invalid.test",
+    "Signed-off-by: dependabot[bot] <" +
+      ["support", "github.com"].join("@") +
+      ">",
+  ];
+  for (const message of messages) {
+    assert.deepEqual(
+      textProblems(bytes(message), [], { allowEmails: true }),
+      [],
+    );
+    assert.ok(
+      textProblems(bytes(message)).includes("non-example email address"),
+    );
+  }
+});
+
+test("commit-message mode retains all other privacy and validity checks", () => {
+  const email = "alice" + "@" + "invalid.test";
+  for (const [text, issue] of [
+    [
+      ["", "Users", "example", "private"].join("/"),
+      "personal absolute home path",
+    ],
+    [
+      "123456789".repeat(2),
+      "possible chat/account ID; use named synthetic fixtures",
+    ],
+    ["CLIENT CEDAR", "local private term"],
+  ]) {
+    assert.ok(
+      textProblems(bytes(`${email}\n${text}`), ["client cedar"], {
+        allowEmails: true,
+      }).includes(issue!),
+    );
+  }
+  for (const data of [
+    Buffer.from([0xff]),
+    bytes("a\0b"),
+    Buffer.alloc(MAX_BYTES + 1, "a"),
+  ]) {
+    assert.ok(textProblems(data, [], { allowEmails: true }).length);
+  }
+});
+
 test("blocks local private terms case-insensitively", () => {
   assert.ok(textProblems(bytes("Client Cedar"), ["client cedar"]).length);
 });
@@ -74,6 +120,53 @@ test("allows templates, documentation, patches, and source", () => {
   ]) {
     assert.deepEqual(pathProblems(name), []);
   }
+});
+
+test("allows project skill documents without allowing agent runtime or executable files", () => {
+  for (const name of [
+    ".agents/AGENTS.md",
+    ".agents/pstack-license.txt",
+    ".agents/skills/verify-rex/SKILL.md",
+    ".agents/skills/verify-rex/features/index.md",
+    ".agents/skills/verify-rex/references/report-template.md",
+  ])
+    assert.deepEqual(pathProblems(name), []);
+  for (const name of [
+    ".agents/settings.json",
+    ".agents/auth.json",
+    ".agents/notes.md",
+    ".agents/skills/verify-rex/scripts/run.ts",
+    ".agents/skills/verify-rex/references/auth.json",
+    ".agents/skills/verify-rex/sessions/chat.md",
+    ".agents/skills/verify-rex/features/.env",
+    ".agents/skills/verify-rex/features/capture.png",
+    ".pi/skills/verify-rex/SKILL.md",
+  ])
+    assert.ok(
+      pathProblems(name).length,
+      "Unreviewed agent paths must stay blocked",
+    );
+});
+
+test("skill path admission preserves content scanning and rejects private blobs before reading", (t) => {
+  const repo = makeRepo(t);
+  const document = ".agents/skills/verify-rex/SKILL.md";
+  repo.write(document, "Safe synthetic verification instructions");
+  repo.write(".agents/settings.json", "NEVER READ THIS");
+  repo.git("add", document, ".agents/settings.json");
+  for (const mode of ["worktree", "index"] as const) {
+    const view = snapshot(repo.root, mode);
+    assert.deepEqual(
+      view.entries.map(([name]) => name),
+      [document],
+    );
+    assert.ok(view.problems.length);
+  }
+  repo.git("rm", "--cached", ".agents/settings.json");
+  rmSync(join(repo.root, ".agents/settings.json"));
+  assert.equal(captureLogs(() => check(repo.root, "worktree")).result, true);
+  repo.write(document, "Contact " + "alice" + "@" + "invalid.test");
+  assert.equal(captureLogs(() => check(repo.root, "worktree")).result, false);
 });
 
 test("rejects binary, invalid UTF-8, and large files", () => {
@@ -199,12 +292,65 @@ test("history accepts intentionally public personal author and committer emails"
   assert.equal(captureLogs(() => history(repo.root, true)).result, true);
 });
 
-test("history rejects private commit messages", (t) => {
+test("history accepts email addresses and bot trailers in commit messages", (t) => {
+  const repo = makeRepo(t);
+  mkdirSync(join(repo.root, ".tools"));
+  symlinkSync(
+    join(ROOT, ".tools/gitleaks"),
+    join(repo.root, ".tools/gitleaks"),
+  );
+  repo.write("README.md", "Safe fixture");
+  repo.git("add", "README.md");
+  for (const message of [
+    "Contact " + "alice" + "@" + "invalid.test",
+    "Dependency update\n\nSigned-off-by: dependabot[bot] <" +
+      ["support", "github.com"].join("@") +
+      ">",
+  ])
+    repo.git("commit", "--allow-empty", "-qm", message);
+  assert.equal(captureLogs(() => history(repo.root, true)).result, true);
+});
+
+test("history retains other commit-message privacy checks", (t) => {
   const repo = makeRepo(t);
   repo.write("README.md", "Safe fixture");
   repo.git("add", "README.md");
-  repo.git("commit", "-qm", "Contact " + "alice" + "@" + "invalid.test");
+  repo.git(
+    "commit",
+    "-qm",
+    "Contact " +
+      "alice" +
+      "@" +
+      "invalid.test; path " +
+      ["", "home", "example", "private"].join("/"),
+  );
   assert.equal(captureLogs(() => history(repo.root)).result, false);
+});
+
+test("history still rejects secrets in email-containing commit messages", (t) => {
+  const repo = makeRepo(t);
+  mkdirSync(join(repo.root, ".tools"));
+  symlinkSync(
+    join(ROOT, ".tools/gitleaks"),
+    join(repo.root, ".tools/gitleaks"),
+  );
+  const token =
+    "gh" +
+    "p_" +
+    createHash("sha256")
+      .update("synthetic message secret")
+      .digest("hex")
+      .slice(0, 36);
+  repo.write("README.md", "Safe fixture");
+  repo.git("add", "README.md");
+  repo.git(
+    "commit",
+    "-qm",
+    "Contact " + "alice" + "@" + "invalid.test; token=" + token,
+  );
+  const observed = captureLogs(() => history(repo.root, true));
+  assert.equal(observed.result, false);
+  assert.ok(!observed.output.includes(token));
 });
 
 test("clean fresh history passes", (t) => {

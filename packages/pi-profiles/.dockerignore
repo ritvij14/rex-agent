@@ -1,0 +1,9 @@
+*
+!package.json
+!src/
+!src/index.ts
+!src/policy.ts
+!src/proposals.ts
+!src/cli.ts
+!src/operator.ts
+!src/verify.ts

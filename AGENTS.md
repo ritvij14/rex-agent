@@ -4,7 +4,7 @@
 
 Rex is a memory-first personal agent system built on Pi's core libraries. This repository has two jobs: version our reusable Pi customizations and hold the definitions needed to run their sandbox. Publish the implementation, not the owner's accounts, conversations, memories, or machine state.
 
-Current stage: repository foundation only. Checks, Git hooks, CI configuration, and documentation exist; the router, profiles, memory engine, sandbox, and durable service do not. The previous Hermes implementation and private research are local-only material, not active modules. Never describe planned features as working.
+Current stage: repository foundation, the terminal-only Docker sandbox in `lab/terminal/`, profile core in `packages/profiles/`, and the minimal Pi SDK adapter in `packages/pi-profiles/`. The adapter provides explicit profile-selected runs, separate histories, tool-name whitelist/blacklist enforcement, and operator-approved profile drafts. Synthetic container acceptance, a baseline live Pi request, and separately approved GLM profile checks (coding write, research read, inactive builder draft) have passed; other live model/API acceptance remains separate and requires inference authentication. Router, model overrides/fallback, filesystem permissions between profiles, memory engine, and durable service do not exist. The previous Hermes implementation and private research are local-only material, not active modules. Never describe planned features as working.
 
 Do not maintain a repository roadmap; the owner tracks it separately. Do not create a standalone examples directory. If demand emerges after the system works, write setup documentation for coding agents with exact steps, private configuration requirements, and verification.
 
@@ -32,11 +32,11 @@ Each `AGENTS.md` governs its own directory and descendants. Parent instructions 
 - In generated, dependency, build-output, vendored, or private/runtime folders. Record ownership and regeneration rules in the nearest maintained ancestor instead.
 - As a second feature manual or local `CLAUDE.md`. Keep reference/design material in focused docs and link to it; root `CLAUDE.md` remains the only compatibility entry point.
 
-Keep one root `README.md` for the public introduction. Do not create nested READMEs unless the owner explicitly requests one for an external distribution requirement. Use exact `AGENTS.md` filenames for scoped working rules, remove stale guides when boundaries disappear, and update links when moving them. Applicable local guides currently exist in `packages/` and `lab/`.
+Keep one root `README.md` for the public introduction. Do not create nested READMEs unless the owner explicitly requests one for an external distribution requirement. Use exact `AGENTS.md` filenames for scoped working rules, remove stale guides when boundaries disappear, and update links when moving them. Applicable local guides currently exist in `.agents/`, `packages/`, `packages/profiles/`, `packages/pi-profiles/`, `lab/`, and `lab/terminal/`.
 
 ## Architecture
 
-Pi supplies the agent engine; Rex owns routing, profiles, memory, policy, and their integration. These are design boundaries, not implemented application features yet.
+Pi supplies the agent engine; Rex owns routing, profiles, memory, policy, and their integration. Profile core rules and their minimal Pi SDK adapter implement the first application boundary; the remaining application boundaries are design requirements, and the terminal sandbox is development infrastructure.
 
 - **Core libraries:** put reusable router, profile, and memory rules in plain TypeScript packages under `packages/`, without imports from Pi, Pi Durable, or provider SDKs. Expose cross-package access through declared public exports, never internal files. Create a package only when real code justifies the boundary.
 - **Adapters:** connect core rules to Pi, Pi Durable, and providers through explicit inputs/outputs. Validate external inputs and keep provider calls replaceable in tests. Do not duplicate business rules in adapters or assume Pi and Pi Durable have the same extension format.
@@ -51,10 +51,10 @@ Intended request flow: validate the request, authorize the action, select an all
 ### Keep private data out of the repository
 
 - Publish source, lockfiles, sanitized decisions, reproducible lab definitions, and invented examples only. Never commit or attach credentials, personal settings/prompts, memories/embeddings, transcripts, traces, account/chat IDs, quota readings, client data, private URLs, or personal screenshots/recordings. This applies equally to code, commit messages, issues, PRs, demos, releases, CI logs, and artifacts.
-- Keep real runtime state outside the clone, such as `~/.rex/`; its loader is not implemented yet. `.local/` is an ignored development/transition holding folder, not the application's database. Never upload it or the old work as a backup branch, tag, archive, or artifact.
+- Keep real runtime state outside the clone, such as `~/.rex/`. The profile core takes an explicit profiles root; automatic application-home discovery and runtime state loading are not implemented. `.local/` is an ignored development/transition holding folder, not the application's database. Never upload it or the old work as a backup branch, tag, archive, or artifact.
 - Do not read `.env`, authentication stores, host settings, or `.local/previous-work/` just to write docs or run checks. Read specific previous source only when a task needs it; write a sanitized replacement rather than copying personal material and hoping redaction is complete. Repository checks need no accounts or credentials.
 - Use synthetic email domains `example.com`, `example.org`, or `example.net`, named fake account IDs, and blank credential templates. Optional `.local/privacy-terms.txt` holds extra private names/phrases, never credentials; it stays local and is not available to CI. Binary attachments need explicit privacy review.
-- Never use `git add .`, `git add -A`, force-add ignored files, bypass hooks, or weaken scanner rules to hide a finding. Stage named, reviewed files. Use the author/committer identity the owner intends to publish; the owner approves using their own email and does not require a noreply address. Review display names and messages too. No AI co-author trailers or automatic commits/pushes.
+- Never use `git add .`, `git add -A`, force-add ignored files, bypass hooks, or weaken scanner rules to hide a finding. Stage named, reviewed files. Use the author/committer identity the owner intends to publish; the owner approves using their own email and does not require a noreply address. Email addresses are also allowed in commit-message subjects, bodies and trailers; secret scanning and all other message privacy checks remain active. File contents and filenames retain the synthetic-email policy. Review display names and messages too. No AI co-author trailers or automatic commits/pushes.
 
 ### Check before sharing
 
@@ -72,7 +72,7 @@ After the approved initial reset, require PRs and passing `Repository checks` on
 
 ## Development and verification
 
-Use Node.js 22 LTS, npm with the committed lockfile, and system `tar` on macOS/Linux. Prefer TypeScript for logic, scripts, and tests; another language needs a concrete benefit. Pinned `tsx` runs `.ts` files, Node's built-in runner runs tests, and strict `tsc --noEmit` checks types without generating source-tree JavaScript. Future distributable packages may need their own builds. Pi CLI 1.3.0 is the verified daily CLI at foundation time, not a project dependency; pin runtime dependencies and add their checks when first used.
+Use Node.js 22 LTS, npm with the committed lockfile, and system `tar` on macOS/Linux. Prefer TypeScript for logic, scripts, and tests; another language needs a concrete benefit. Pinned `tsx` runs `.ts` files, Node's built-in runner runs tests, and strict `tsc --noEmit` checks types without generating source-tree JavaScript. Future distributable packages may need their own builds. Pi CLI 1.3.0 is pinned in the terminal experiment's own manifest and lockfile, not installed as a root dependency. Keep runtime versions and their checks explicit when adding other experiments.
 
 1. Inspect the actual code and callers; state assumptions and ask when a decision is needed.
 2. Reproduce bugs first. Define success, invalid inputs, denied actions, and relevant failure/retry cases before new behavior.
@@ -81,6 +81,18 @@ Use Node.js 22 LTS, npm with the committed lockfile, and system `tar` on macOS/L
 5. Update the affected feature docs and decision record with meaningful behavior or design changes. Do not create duplicate policy docs or move planning back into the repo.
 
 Use kebab-case paths without whitespace. TypeScript/JSON/YAML use two spaces. Comments explain non-obvious constraints only. Keep regression tests with synthetic fixtures. Markdown uses one source line per paragraph with no fixed line-length limit; the roughly 80-character target applies to code, not prose.
+
+## Project verification workflow
+
+Use the project-local skills under `.agents/skills/` when developing Rex. Before writing or changing tests, read `principle-test-behavior-not-implementation/SKILL.md`; for practical bug reproductions, also read `tdd/SKILL.md`. Before reporting implementation complete, follow `verify-rex/SKILL.md` and `principle-prove-it-works/SKILL.md`. Derive observable checks from the user's intended result, select relevant failure risks and exercise the actual installed interface for runtime changes. These instructions do not grant new permissions or override the task's allowed scope.
+
+Extend the verification feature map and reusable checks when behavior changes; use `create-verification-skill` for a genuinely missing recipe and `maintain-verification-skill` for drift or escaped bugs. Start with the main agent, not automatic reviewers or swarms. `npm run verify -- full` retains source-fingerprinted evidence for the existing account-free checks and disposable container acceptance. Report task-specific QA and sensitivity observations separately; a green baseline is not proof of every feature. Keep raw development evidence in ignored `.local/verification/`, never application histories or public artifacts. See [testing](docs/infra/testing.md) for commands and limits. These project skills are not enabled inside sandbox profiles.
+
+### Live-provider QA
+
+The owner has given standing approval for inference calls through the existing model proxy when needed to verify requested Rex work; do not ask again per run or substitute synthetic-only evidence for behavior that needs a real model. Prefer inexpensive suitable models, with 6.1 Luna or Haiku 5.5 as the owner's examples. Resolve actual available model IDs rather than inventing aliases or assuming availability/prices; test the specific target model when compatibility or behavior depends on it. Use the smallest useful set of calls, not arbitrary output caps that compromise the test.
+
+Keep deterministic tests and CI synthetic and account-free. Live QA uses invented tasks and isolated test configuration/state, does not silently change active profile models, and records the tested provider/model plus live versus synthetic coverage. This approval does not cover credential-store access, account/proxy management, new services, publication, browsers or subagents. Missing configured access is a blocker to diagnose, not permission to read secrets or retry a failing batch blindly.
 
 Use focused branches such as `feat/router`, `fix/privacy-check`, or `docs/memory-spec`, and `feat:`, `fix:`, `chore:`, `test:`, or `docs:` commits. Changes to `.githooks/`, `.github/`, `scripts/repo-check.ts`, `scripts/check-commit.ts`, scanner installation/checksums, `.gitignore`, or publication policy must explain the security impact and include relevant rejection tests. These safeguards do not replace runtime authorization or a sandbox.
 

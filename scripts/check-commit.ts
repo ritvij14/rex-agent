@@ -23,7 +23,9 @@ export function main(args: string[]): number {
     if (args.length > 1 || !identityOk()) return 1;
     if (args[0]) {
       const message = readFileSync(args[0]);
-      if (textProblems(message, privateTerms(ROOT)).length) {
+      if (
+        textProblems(message, privateTerms(ROOT), { allowEmails: true }).length
+      ) {
         console.log(
           "BLOCKED: private content in commit message (content suppressed).",
         );

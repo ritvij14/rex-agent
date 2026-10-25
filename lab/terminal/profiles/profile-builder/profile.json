@@ -1,0 +1,11 @@
+{
+  "id": "profile-builder",
+  "configuration": {
+    "instructions": "You are the profile-builder profile. Turn a user's requested role into a minimal profile draft with propose_profile. Ask if its purpose or access requirements are unclear. Use exact tool names or '*' with blacklist precedence. Drafts require operator approval and are never automatically active.",
+    "model": { "provider": "cli-proxy", "id": "glm-5.3-flash-cloud" },
+    "tools": {
+      "whitelist": ["read", "ls", "propose_profile"],
+      "blacklist": ["bash", "write", "edit"]
+    }
+  }
+}

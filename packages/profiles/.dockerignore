@@ -1,0 +1,6 @@
+*
+!package.json
+!src/
+!src/index.ts
+!src/configuration.ts
+!src/errors.ts
