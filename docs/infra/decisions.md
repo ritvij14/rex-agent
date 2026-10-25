@@ -153,3 +153,13 @@
 **Reason:** synthetic providers make faults reproducible but cannot establish actual provider compatibility or model behavior. Avoiding all paid calls would leave those claims unverified and shift QA back to the owner.
 
 **Boundary:** this changes the earlier task-by-task inference-approval policy, not credential, account/proxy-management, publication, browser or delegation permissions. CI and deterministic default checks remain synthetic/account-free; live tests use invented inputs and isolated state with private evidence. This is a selection policy, not a claim that the example models are available or a new automatic model-routing implementation.
+
+## 016: Allow email addresses in commit messages, retain other safeguards
+
+**Decision:** the owner permits email addresses in commit-message subjects, bodies and trailers, not just author/committer metadata. The commit hook and historical message check explicitly opt into that allowance. File contents and filenames retain their existing synthetic-email rules.
+
+**Reason:** CI fetches remote Dependabot proposals whose standard signed-off trailers contain a public bot email. The previous general non-example-email rule classified those messages as private content even though local checks on the feature/main refs passed. The owner chose to allow message emails generally rather than add a bot-specific exception.
+
+**Security impact:** only email classification changes in message context. The full unmodified message still reaches Gitleaks; credentials, personal home paths, long account/chat-like numbers, local private phrases, size and encoding checks remain active. No refs are excluded or deleted, no secret patterns are relaxed, and no hooks or CI protections are bypassed.
+
+**Verification:** real installed-hook and history tests accept ordinary emails and bot trailers while rejecting secrets and other private content in email-containing messages. Default file checks still reject non-example emails. Fetch the previously unseen remote proposal refs and scan their complete history before relying on local release results; rerun PR CI before merging.
