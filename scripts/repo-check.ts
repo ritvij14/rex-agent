@@ -143,9 +143,16 @@ export function pathProblems(name: string): string[] {
   if (/[\s\p{Cc}]/u.test(name)) {
     issues.push("whitespace or control character in path");
   }
+  const skillDocument =
+    name === ".agents/AGENTS.md" ||
+    name === ".agents/pstack-license.txt" ||
+    /^\.agents\/skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:SKILL\.md|(?:features|references)\/[a-z0-9]+(?:-[a-z0-9]+)*\.md)$/.test(
+      name,
+    );
   if (
-    (parts.length === 1 && !ROOT_FILES.has(name)) ||
-    (parts.length > 1 && !PUBLIC_DIRS.has(parts[0]!))
+    !skillDocument &&
+    ((parts.length === 1 && !ROOT_FILES.has(name)) ||
+      (parts.length > 1 && !PUBLIC_DIRS.has(parts[0]!)))
   ) {
     issues.push("path not approved for publication");
   }

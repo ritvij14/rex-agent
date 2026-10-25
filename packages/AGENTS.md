@@ -1,6 +1,6 @@
 # Workspace package instructions
 
-Scope: `packages/` and its descendants. Inherit the [root instructions](../AGENTS.md). No application package exists yet; this guide governs adding the first implementation, not a claim that any package already works.
+Scope: `packages/` and its descendants. Inherit the [root instructions](../AGENTS.md). The core library `profiles/` implements profile lookup/scope/configuration/policy, and `pi-profiles/` connects it to Pi SDK sessions and operator-approved drafts. Read each scoped guide before working there. Other package boundaries require real implementations, not placeholders.
 
 ## Creating a package
 
@@ -16,6 +16,6 @@ Create `packages/<name>/AGENTS.md` with its first implementation or package mani
 
 Keep new manifests `private: true` until publication is approved. Declare exports and dependencies explicitly; do not depend on undeclared root tools or another workspace's internal files. Add exact versions through npm and update the shared lockfile using npm, not hand edits.
 
-Root typechecking currently covers repository scripts/tests only. Add real package checks to the root command and CI with the first implementation; do not report a package as verified merely because repository tooling passes. If a package needs emitted distribution files, document that build separately and keep generated output out of source control.
+`npm run typecheck` checks core/repository code with root NodeNext and the Pi adapter with its strict package-specific Bundler/DOM configuration; neither skips declaration checking. Root tests include `packages/*/tests/*.test.ts`; CI runs both through `npm run check`. Put tests for new packages under their own `tests/` directory and import their public exports. Add any additional real package checks when its implementation requires them; do not report a package as verified merely because repository tooling passes. If a package needs emitted distribution files, document that build separately and keep generated output out of source control.
 
 Avoid guides in ordinary `src/`, helper, or test subfolders when the package guide already covers them. Split instructions only at a real additional boundary under the root placement rules.

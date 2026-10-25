@@ -89,3 +89,67 @@
 **Reason:** a deliberately public author identity is not a private account credential. This approval does not permit publishing other people's personal data or authentication material.
 
 **Verification:** a personal-email commit and clean history must pass, but credential-shaped identity data must still fail without printing the match.
+
+## 010: Terminal-only sandbox with the existing model proxy
+
+**Decision:** start with an empty Pi coding workspace in Docker, without a browser, demonstration application, Pi Durable, or copied host configuration. Pin the image and tools. Give the agent no external network interface; permit model requests through a read-only Unix-socket connection to a separate fixed-destination inference gateway. Reuse the Mac's existing CLI Proxy API rather than rebuilding its account/model service.
+
+**Reason:** the sandbox is for developing Rex's harness. Its first acceptance criteria are permitted workspace execution and denied host/network access, not application quality. A host address or internal Docker bridge alone would not enforce an inference-only exception. Gateway restrictions apply even if the agent changes its local relay.
+
+**Tradeoff:** the gateway is trusted code and Docker remains trusted infrastructure. Inference consumes the existing accounts' limits. Live acceptance needs separately supplied client authentication and approval; synthetic success does not prove live model compatibility. Workspace volumes are persistent but do not have individual disk quotas. Additional runtime dependencies require an explicit image change.
+
+**Verification:** deterministic tests reject management routes, URL overrides, credential/forwarding headers, malformed or oversized bodies, redirects, CONNECT, upgrades, and excess concurrency. Real synthetic container checks verify mounts, privileges, resource settings, process-limit rejection, Pi inference, interruption/recovery, persistent recreation, and isolated reset. The CI change adds account-free Docker execution with no repository secrets, new permissions, or uploaded artifacts; rejected access is tested against the actual boundary. See [terminal sandbox operations](terminal-sandbox.md).
+
+## 011: Explicit per-turn profile identity, not process-wide activation
+
+**Decision:** implement the first profile core as a Pi-independent TypeScript package. Every turn supplies an explicit profile ID. Resolve it directly under a caller-supplied absolute profiles root, require a minimal matching `profile.json`, and bind a frozen identity/home through `AsyncLocalStorage`. Missing/invalid profiles never fall back. Reject nested turns on the same runtime and deny context lookup after completion or cancellation, without changing environment variables or the working directory.
+
+**Reason:** a long-running process must support independent concurrent profiles. Changing a process-wide home/current-profile value would allow unrelated turns to affect one another. Keeping lookup/scope independent lets the router later supply the same ID without embedding selection rules in execution.
+
+**Tradeoff:** this is logical context, not an operating-system sandbox or permission system. Provisioning must control the profiles root and definitions; lookup rejects symlinks but does not protect against concurrent hostile directory replacement. Cancellation is cooperative, and previously obtained paths cannot be revoked. Process/thread/restart boundaries require explicit identity transfer by adapters.
+
+**Original boundary:** automatic selection belongs to the future Jev-based router, with user-forced profile/model choices supported separately. The first slice implemented identity/scope only. Decision 012 extends it with minimal configuration and a Pi adapter; primary/ordered fallback models and memory remain separate. See [the implemented profile contract](../features/profiles.md).
+
+**Verification:** public-export tests use real temporary synthetic homes for valid/rejected/bounded lookup, immutable identity, overlapping asynchronous reads, independent runtimes, nested/closed scopes, failure/cancellation, and unchanged synthetic process environment/working directory. Root typechecking and CI include package sources/tests without new runtime dependencies in the core.
+
+## 012: Minimal Pi profile runs, tool policy and operator-approved drafts
+
+**Decision:** connect the profile core through a separate pinned Pi SDK adapter, not by changing a global profile or sharing a session while swapping prompts. Require an exact first-line `profile: <id>` selector until the router exists. Start with generic coding/research/profile-builder definitions on GLM 5.3 Flash Cloud, literal instructions, one model reference and tool whitelist/blacklist. Allow exact names or `*`, with blacklist precedence and default deny, bounded by the adapter's installed tool catalog.
+
+**Reason:** the owner wants working small profiles that evolve with the package. A wildcard avoids exhaustively listing coding capabilities; execution-time checks ensure denied tools cannot be enabled by model instructions. The minimal SDK command makes the whole model/tool loop profile-scoped and preserves separate histories without deeply modifying Pi's TUI.
+
+**Approval boundary:** profile-builder writes validated drafts only. Active definitions are a read-only named volume for the agent. A separate operator-triggered, networkless helper mounts only active definitions and read-only proposals, checks an exact reviewed canonical digest, and creates a new profile without overwriting. Its root UID has no host mounts, Docker socket, inference socket/auth, capabilities or writable root filesystem. A model cannot approve its own permission changes.
+
+**Tradeoff:** permissions cover tool names, not arbitrary files, shell commands or model endpoints. An allowed shell can access shared container files; separate session loading is not filesystem confidentiality. Research initially reads local documents only. Runtime/context/history limits bound this prototype; provider response limits apply as clarified in decision 014; fallback, model overrides, additional resources and existing-profile updates are not implemented. Profile volume contents survive image rebuilds rather than being overwritten by defaults.
+
+**Verification:** core and real SDK tests use synthetic data/providers. Container acceptance covers package-context filtering, the command, all three profile/model selections, read-only definitions, operator-helper restrictions, admission and persistence. Refresh recreates only the sandbox with `--no-deps`, preserving the authenticated gateway. Live GLM tests are separately approved, never CI. Strict adapter-only Bundler/DOM checking accommodates Pi's published provider declarations without `skipLibCheck` or dependency patches; the core remains strict NodeNext.
+
+## 013: Project-local, repeatable verification before broader autonomy
+
+**Decision:** adapt the test-behavior, focused TDD, prove-it-works, verification-creation and maintenance ideas from pstack into project-local Pi skills. Keep one Rex verification recipe and a small map of implemented user journeys. Reuse existing source checks and disposable synthetic container acceptance through a thin evidence runner. The main agent remains the executor; this does not add a QA agent, planner, global installation, browser workflow or automatic publication.
+
+**Reason:** confidence should come from meaningful assertions, actual user-path observations and retained rerunnable evidence, not agent self-reports or more generic instruction text. Project instructions explicitly route implementation work through the skills; simply installing Markdown would not ensure they are used.
+
+**Tradeoff:** skills require judgment and do not enforce authorization or guarantee QA expertise. The runner reports only selected baseline checks; task-specific exploration and sensitivity must be recorded separately. Raw logs stay in an ignored local development holding area and must not be published. Existing failures remain failures; a maintenance pass cannot rewrite product expectations to hide them. Sandbox profiles still do not load project skills.
+
+**Publication impact:** admit only project skill Markdown, the scoped guide and retained attribution license under `.agents/`, not the directory wholesale. Agent settings, executable helpers and runtime data stay denied; all existing private-path/content/link/secret checks remain in force. No ignore rules, hooks, CI permissions or scanner settings are weakened.
+
+**Verification:** validate real Pi skill discovery, actual process success/failure/missing-tool handling, stale/empty/partial-result rejection and retained non-overwriting evidence. Exercise the real installed CLI with the existing fake-provider Docker suite, preserving normal runtime state. Skill effectiveness on future autonomous tasks remains a human-reviewed question, not a claim inferred from parser tests.
+
+## 014: Provider-owned output limits and explicit incomplete-response failure
+
+**Decision:** remove the adapter's arbitrary 1024-token response ceiling rather than replace it with a different universal cap. With pinned Pi 1.3.0 and the OpenAI-compatible API, zero numeric output metadata omits `max_tokens` and `max_completion_tokens`. The provider chooses its output limits. When a finalized response reports `length`, abort the turn and reject with the fixed public `IncompleteProfileResponseError`; the CLI fails explicitly without printing a partial answer as success.
+
+**Reason:** a test budget should not silently restrict ordinary coding responses, and removing that budget does not eliminate provider truncation. Observing the finalized response also stops the SDK from automatically reissuing failed partial tool calls.
+
+**Tradeoff:** this is not unlimited output or atomic execution. Earlier complete tool actions may already have taken effect; they are neither rolled back nor automatically repeated. The public error warns about them. Model defaults, context/history/request/deadline limits and permission rules are unchanged. Installing the change uses a sandbox-only refresh, not a reset or gateway recreation.
+
+**Verification:** regressions demonstrate failing-before and passing-after for partial/empty text, truncated tool arguments and a cut-off final summary after a completed write. Real installed CLI acceptance checks exit status, stderr, suppressed partial stdout and recovery. The installed loopback response check verifies all three profiles and cap-free payloads without paid calls or normal state. Refresh acceptance checks the unchanged gateway and volumes plus persistent synthetic markers and existing history/definition metadata.
+
+## 015: Standing approval for necessary low-cost live QA
+
+**Decision:** live inference through the existing proxy is authorized during requested Rex development/verification when needed; the agent should perform it without another per-run approval request. Prefer inexpensive adequate models, with 6.1 Luna and Haiku 5.5 as the owner's examples, after resolving available IDs. Verify the specific target model when the result depends on it. Do not change active profile defaults merely to select a QA model.
+
+**Reason:** synthetic providers make faults reproducible but cannot establish actual provider compatibility or model behavior. Avoiding all paid calls would leave those claims unverified and shift QA back to the owner.
+
+**Boundary:** this changes the earlier task-by-task inference-approval policy, not credential, account/proxy-management, publication, browser or delegation permissions. CI and deterministic default checks remain synthetic/account-free; live tests use invented inputs and isolated state with private evidence. This is a selection policy, not a claim that the example models are available or a new automatic model-routing implementation.

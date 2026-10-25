@@ -16,6 +16,8 @@ Status: implemented locally. Remote history replacement and GitHub protection se
 
 `git ls-files` supplies tracked paths plus untracked, non-ignored paths. Missing tracked files are skipped in this working-tree view only. Private paths are rejected before reading their contents. Allowed roots are explicit; new top-level directories need review. Symlinks, submodules, binary/non-UTF-8 files, oversized files, runtime paths, and original planning/research paths are rejected.
 
+Project verification adds a narrow `.agents/` exception: `.agents/AGENTS.md`, its pstack attribution license, and skill `SKILL.md` plus shallow Markdown `features/` and `references/` documents. It does not admit arbitrary agent files, executable helpers, settings, credentials or runtime state. Existing private-path, link, size, content and secret checks still apply to admitted documents. Regression tests check both accepted instructions and rejected agent state in working/index snapshots, including content rejection inside an admitted skill. `.pi/` remains private and ignored.
+
 Formatting uses this same eligible path list, so it never walks the private holding folder. It is not a substitute for privacy checking or typechecking. `npm run typecheck` checks the repository's TypeScript scripts and tests with strict settings and `noEmit`; it is included in the root check. No application package exists yet.
 
 ## Commit and push

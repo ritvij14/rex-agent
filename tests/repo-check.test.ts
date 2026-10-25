@@ -76,6 +76,53 @@ test("allows templates, documentation, patches, and source", () => {
   }
 });
 
+test("allows project skill documents without allowing agent runtime or executable files", () => {
+  for (const name of [
+    ".agents/AGENTS.md",
+    ".agents/pstack-license.txt",
+    ".agents/skills/verify-rex/SKILL.md",
+    ".agents/skills/verify-rex/features/index.md",
+    ".agents/skills/verify-rex/references/report-template.md",
+  ])
+    assert.deepEqual(pathProblems(name), []);
+  for (const name of [
+    ".agents/settings.json",
+    ".agents/auth.json",
+    ".agents/notes.md",
+    ".agents/skills/verify-rex/scripts/run.ts",
+    ".agents/skills/verify-rex/references/auth.json",
+    ".agents/skills/verify-rex/sessions/chat.md",
+    ".agents/skills/verify-rex/features/.env",
+    ".agents/skills/verify-rex/features/capture.png",
+    ".pi/skills/verify-rex/SKILL.md",
+  ])
+    assert.ok(
+      pathProblems(name).length,
+      "Unreviewed agent paths must stay blocked",
+    );
+});
+
+test("skill path admission preserves content scanning and rejects private blobs before reading", (t) => {
+  const repo = makeRepo(t);
+  const document = ".agents/skills/verify-rex/SKILL.md";
+  repo.write(document, "Safe synthetic verification instructions");
+  repo.write(".agents/settings.json", "NEVER READ THIS");
+  repo.git("add", document, ".agents/settings.json");
+  for (const mode of ["worktree", "index"] as const) {
+    const view = snapshot(repo.root, mode);
+    assert.deepEqual(
+      view.entries.map(([name]) => name),
+      [document],
+    );
+    assert.ok(view.problems.length);
+  }
+  repo.git("rm", "--cached", ".agents/settings.json");
+  rmSync(join(repo.root, ".agents/settings.json"));
+  assert.equal(captureLogs(() => check(repo.root, "worktree")).result, true);
+  repo.write(document, "Contact " + "alice" + "@" + "invalid.test");
+  assert.equal(captureLogs(() => check(repo.root, "worktree")).result, false);
+});
+
 test("rejects binary, invalid UTF-8, and large files", () => {
   for (const data of [
     Buffer.from([0xff]),

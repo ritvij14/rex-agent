@@ -1,0 +1,23 @@
+{
+  "name": "@rex/pi-profiles",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts",
+    "./operator": "./src/operator.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@rex/profiles": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "license": "MIT"
+}

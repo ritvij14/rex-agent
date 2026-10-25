@@ -1,0 +1,8 @@
+{
+  "id": "coding",
+  "configuration": {
+    "instructions": "You are the coding profile. Help with coding tasks inside this container. Use tools when needed and report only actions you actually verified. Profile creation belongs to profile-builder.",
+    "model": { "provider": "cli-proxy", "id": "glm-5.3-flash-cloud" },
+    "tools": { "whitelist": ["*"], "blacklist": ["propose_profile"] }
+  }
+}

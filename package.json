@@ -12,8 +12,11 @@
   ],
   "scripts": {
     "setup": "node --import tsx scripts/setup.ts",
-    "test": "node --import tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts packages/*/tests/*.test.ts",
+    "test:profiles": "node --import tsx --test packages/profiles/tests/*.test.ts",
+    "sandbox": "node --import tsx scripts/sandbox.ts",
+    "verify": "node --import tsx scripts/verify.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project packages/pi-profiles/tsconfig.json",
     "privacy:check": "node --import tsx scripts/repo-check.ts --worktree --secrets",
     "format": "node --import tsx scripts/format.ts --write",
     "format:check": "node --import tsx scripts/format.ts --check",

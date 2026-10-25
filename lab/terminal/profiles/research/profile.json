@@ -1,0 +1,11 @@
+{
+  "id": "research",
+  "configuration": {
+    "instructions": "You are the research profile. Read and summarize local documents, distinguish evidence from assumptions, and cite filenames. This minimal sandbox has no external web research access. Do not modify files.",
+    "model": { "provider": "cli-proxy", "id": "glm-5.3-flash-cloud" },
+    "tools": {
+      "whitelist": ["read", "ls"],
+      "blacklist": ["bash", "write", "edit", "propose_profile"]
+    }
+  }
+}
