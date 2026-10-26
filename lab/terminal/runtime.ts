@@ -79,6 +79,40 @@ async function main() {
           res.end('{"error":"revised instruction was not loaded"}');
           return;
         }
+        if (
+          text.includes("synthetic-fallback") &&
+          payload.model === "synthetic-model"
+        ) {
+          res.writeHead(503);
+          res.end('{"error":"synthetic temporary failure"}');
+          return;
+        }
+        if (
+          text.includes("synthetic-reasoning-low") &&
+          payload.reasoning_effort !== "low"
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"reasoning effort missing"}');
+          return;
+        }
+        if (
+          text.includes("synthetic-resource-instructions") &&
+          (!requestText.includes("Shared resource instruction.") ||
+            !requestText.includes("Own resource instruction.") ||
+            requestText.includes("Ignored resource text."))
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"instruction resource mismatch"}');
+          return;
+        }
+        if (
+          text.includes("synthetic-workspace-instruction") &&
+          !requestText.includes("Explicit selected workspace instruction.")
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"workspace instruction missing"}');
+          return;
+        }
         const truncated = text.includes("synthetic-truncated-response");
         if (
           text.includes("synthetic-cap-free-response") &&
@@ -125,6 +159,28 @@ async function main() {
             },
             failed: true,
           },
+          "synthetic-extension-call": {
+            name: "fixture_probe",
+            args: {},
+          },
+          "synthetic-extension-nested": {
+            name: "fixture_probe",
+            args: { nested: true },
+            failed: true,
+          },
+          "synthetic-skill-use": {
+            name: "read",
+            args: {
+              path: "/profiles/soul-check/resources/skills/review/SKILL.md",
+            },
+          },
+          "synthetic-soul-update": {
+            name: "revise_profile",
+            args: {
+              id: "soul-check",
+              instructions: "Synthetic revised instruction.",
+            },
+          },
           "synthetic-self-update": {
             name: "revise_profile",
             args: {
@@ -158,6 +214,16 @@ async function main() {
             return;
           }
         }
+        if (
+          text.includes("synthetic-skill-use") &&
+          (!requestText.includes("Selected synthetic skill description.") ||
+            (!called && requestText.includes("SKILL_BODY_AFTER_LOADING")) ||
+            (called && !requestText.includes("SKILL_BODY_AFTER_LOADING")))
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"skill loading mismatch"}');
+          return;
+        }
         const invoke = task && !called;
         res.setHeader("content-type", "text/event-stream");
         const chunk = {
@@ -186,7 +252,9 @@ async function main() {
                     role: "assistant",
                     content: truncated
                       ? "synthetic-private-partial"
-                      : "synthetic",
+                      : text.includes("synthetic-template correctness")
+                        ? "synthetic-template-ok"
+                        : "synthetic",
                   },
               finish_reason: null,
             },

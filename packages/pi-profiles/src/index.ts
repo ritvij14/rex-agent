@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { Type } from "typebox";
 import {
   createAgentSession,
+  loadSkills,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
@@ -10,16 +11,25 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
+  DEFAULT_TURN_LIMITS,
   isToolAllowed,
   loadSharedConfiguration,
+  loadWorkspaceInstructions,
   parseProfileRequest,
+  parseProfileDefinition,
+  planProfileModels,
   ProfileError,
   ProfileRuntime,
   resolveEffectiveProfile,
   type SharedConfiguration,
 } from "@rex/profiles";
 import { createProposal } from "./proposals.ts";
-import { narrowsTools, requireRunnable, TOOL_NAMES } from "./policy.ts";
+import {
+  narrowsTools,
+  operatorToolNames,
+  requireRunnable,
+  TOOL_NAMES,
+} from "./policy.ts";
 export {
   createProposal,
   reviewProposal,
@@ -27,6 +37,7 @@ export {
   bundleDigest,
   sharedConfigurationDigest,
 } from "./proposals.ts";
+import { loadInstalledExtensions } from "./installed-extensions.ts";
 export { TOOL_NAMES } from "./policy.ts";
 
 export class IncompleteProfileResponseError extends Error {
@@ -47,6 +58,8 @@ export interface ProfileRequestOptions {
   baseUrl: string;
   newSession?: boolean;
   maintain?: boolean;
+  modelOverride?: string;
+  installedExtensionsRoot?: string;
   signal?: AbortSignal;
 }
 
@@ -92,7 +105,15 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
       const profile = runtime.current();
       const config = requireRunnable(
         resolveEffectiveProfile(profile, shared).configuration,
+        operatorToolNames(shared),
       );
+      const limits = { ...DEFAULT_TURN_LIMITS, ...config.limits };
+      const candidates = planProfileModels(
+        config.model,
+        shared?.models,
+        options.modelOverride,
+      );
+      let selection = candidates[0]!;
       const state = join(options.stateRoot.trim(), profile.id);
       await mkdir(state, { recursive: true, mode: 0o700 });
       const lockPath = join(state, "turn.lock");
@@ -104,6 +125,11 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           "Profile is busy or its turn lock needs operator recovery.",
         );
       }
+      const deadline = setTimeout(
+        () => controller.abort(new Error("Profile turn deadline reached.")),
+        limits.deadlineMs,
+      );
+      deadline.unref();
       try {
         const agentDir = join(state, "agent");
         const sessions = join(state, "sessions");
@@ -120,28 +146,31 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           baseUrl: origin.href,
           api: "openai-completions",
           apiKey: "sandbox-placeholder",
-          models: [
-            {
-              id: config.model.id,
-              name: config.model.id,
-              reasoning: false,
-              input: ["text"],
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              contextWindow: 32768,
-              // Pi requires a number; zero omits the OpenAI output-token cap.
-              maxTokens: 0,
-            },
-          ],
+          models: candidates.map((candidate) => ({
+            id: candidate.id,
+            name: candidate.id,
+            api: candidate.metadata?.api ?? "openai-completions",
+            baseUrl:
+              candidate.metadata?.api === "anthropic-messages"
+                ? origin.origin
+                : origin.href,
+            reasoning: candidate.metadata?.reasoning ?? false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: candidate.metadata?.contextWindow ?? 32768,
+            // Zero leaves OpenAI output limits unset; Anthropic requires a catalog limit.
+            maxTokens: candidate.metadata?.maxOutputTokens ?? 0,
+          })),
         });
-        const model = modelRuntime.getModel(
-          config.model.provider,
-          config.model.id,
-        );
+        const model = modelRuntime.getModel(selection.provider, selection.id);
         if (!model) throw new Error("Profile model is unavailable.");
         const settings = SettingsManager.inMemory({
           retry: {
             enabled: false,
-            provider: { maxRetries: 0, timeoutMs: 60000 },
+            provider: {
+              maxRetries: 0,
+              timeoutMs: Math.min(60000, limits.deadlineMs),
+            },
           },
           compaction: { enabled: false },
           cacheWarming: "off",
@@ -149,12 +178,70 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           enableInstallTelemetry: false,
           enableAnalytics: false,
         });
-        const toolNames = TOOL_NAMES.filter((name) =>
+        const ownResources =
+          profile.configuration?.resources ?? profile.resources;
+        const extensionIds = [
+          ...new Set([
+            ...(shared?.resources?.extensions ?? []),
+            ...(ownResources?.extensions ?? []),
+          ]),
+        ];
+        const installed = await loadInstalledExtensions(
+          shared?.extensionCatalog,
+          extensionIds,
+          options.installedExtensionsRoot,
+        );
+        const availableNames: readonly string[] = [
+          ...TOOL_NAMES,
+          ...installed.tools,
+        ];
+        const toolNames = availableNames.filter((name) =>
           isToolAllowed(config.tools, name),
         );
         const visible = options.maintain
           ? [...toolNames, "revise_profile"]
           : toolNames;
+        const workspacePaths = [
+          ...new Set([
+            ...(shared?.resources?.workspaceInstructions ?? []),
+            ...(ownResources?.workspaceInstructions ?? []),
+          ]),
+        ];
+        const workspaceInstructions = workspacePaths.length
+          ? await loadWorkspaceInstructions(options.cwd.trim(), workspacePaths)
+          : [];
+        const instructions = [
+          config.instructions,
+          ...workspaceInstructions.map((file) => file.text),
+        ].join("\n\n");
+        const sharedHome = join(options.profilesRoot.trim(), "shared");
+        const skillPaths = [
+          ...(shared?.resources?.skills?.map((path) =>
+            join(sharedHome, path),
+          ) ?? []),
+          ...(ownResources?.skills?.map((path) => join(profile.home, path)) ??
+            []),
+        ];
+        const promptPaths = [
+          ...(shared?.resources?.prompts?.map((path) =>
+            join(sharedHome, path),
+          ) ?? []),
+          ...(ownResources?.prompts?.map((path) => join(profile.home, path)) ??
+            []),
+        ];
+        const skills = loadSkills({
+          cwd: options.cwd.trim(),
+          agentDir,
+          skillPaths,
+          includeDefaults: false,
+        });
+        if (
+          skills.diagnostics.length ||
+          (skills.skills.length && !isToolAllowed(config.tools, "read"))
+        )
+          throw new Error(
+            "Configured profile skills are invalid or unreadable under tool policy.",
+          );
         const denied: string[] = [];
         const proposalParameters = Type.Object(
           {
@@ -228,48 +315,86 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           async execute(_id, params, signal) {
             signal?.throwIfAborted();
             runtime.current();
-            if (!options.maintain || !profile.configuration)
+            if (!options.maintain)
               throw new Error("Tool denied by profile policy.");
             if (params.id !== profile.id) {
               throw new Error(
                 "An existing profile may be updated only by a draft from the same profile.",
               );
             }
-            const tools = {
-              whitelist: params.whitelist ?? [
-                ...profile.configuration.tools.whitelist,
-              ],
-              blacklist: params.blacklist ?? [
-                ...profile.configuration.tools.blacklist,
-              ],
-            };
+            const own = profile.configuration;
+            const currentTools = own?.tools ?? profile.tools;
+            const tools =
+              params.whitelist || params.blacklist
+                ? {
+                    whitelist:
+                      params.whitelist ??
+                      currentTools?.whitelist ??
+                      shared?.tools?.whitelist ??
+                      [],
+                    blacklist:
+                      params.blacklist ?? currentTools?.blacklist ?? [],
+                  }
+                : currentTools;
+            const model =
+              params.model !== undefined
+                ? { provider: "cli-proxy", id: params.model }
+                : (own?.model ?? profile.model);
+            const definition = parseProfileDefinition(
+              own
+                ? {
+                    id: profile.id,
+                    configuration: {
+                      instructions: params.instructions ?? own.instructions,
+                      model,
+                      tools,
+                      ...(own.limits ? { limits: own.limits } : {}),
+                      ...(own.resources ? { resources: own.resources } : {}),
+                    },
+                  }
+                : {
+                    version: 2,
+                    id: profile.id,
+                    ...(model ? { model } : {}),
+                    ...(tools ? { tools } : {}),
+                    ...(profile.limits ? { limits: profile.limits } : {}),
+                    ...(profile.resources
+                      ? { resources: profile.resources }
+                      : {}),
+                  },
+            );
+            const soul = own
+              ? undefined
+              : (params.instructions ?? profile.soul);
             const next = {
-              id: profile.id,
+              ...definition,
               home: profile.home,
-              configuration: {
-                instructions:
-                  params.instructions ?? profile.configuration.instructions,
-                model: params.model
-                  ? { provider: "cli-proxy" as const, id: params.model }
-                  : profile.configuration.model,
-                tools,
-              },
+              ...(soul !== undefined ? { soul } : {}),
+              ...(profile.resourceFiles
+                ? { resourceFiles: profile.resourceFiles }
+                : {}),
             };
             const proposed = resolveEffectiveProfile(
               next,
               shared,
             ).configuration;
-            if (!proposed || !narrowsTools(config.tools, proposed.tools)) {
+            if (
+              !proposed ||
+              !narrowsTools(
+                config.tools,
+                proposed.tools,
+                operatorToolNames(shared),
+              )
+            ) {
               throw new Error("A profile revision cannot add tools.");
             }
             const proposal = await createProposal(
               options.profilesRoot,
               options.proposalsRoot,
-              {
-                id: next.id,
-                configuration: next.configuration,
-              },
+              definition,
               { operation: "update", origin: profile.id },
+              soul,
+              profile.resourceFiles,
             );
             return {
               content: [
@@ -286,6 +411,19 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           },
         };
         let requests = 0;
+        let responseStarted = false;
+        let lastStatus: number | undefined;
+        const attempts: string[] = [];
+        const streamSimple = modelRuntime.streamSimple.bind(modelRuntime);
+        modelRuntime.streamSimple = (model, context, options) =>
+          streamSimple(model, context, {
+            ...options,
+            fetch: async (...args) => {
+              const response = await fetch(...args);
+              lastStatus = response.status;
+              return response;
+            },
+          });
         const loader = new DefaultResourceLoader({
           cwd: options.cwd.trim(),
           agentDir,
@@ -295,13 +433,17 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
+          skillsOverride: () => skills,
+          additionalPromptTemplatePaths: promptPaths,
           systemPrompt: "",
           appendSystemPrompt: [],
-          systemPromptOverride: () => config.instructions,
+          systemPromptOverride: () => instructions,
           extensionFactories: [
+            ...installed.factories,
             (pi) => {
               pi.on("tool_call", (event) => {
                 runtime.current();
+                responseStarted = true;
                 if (event.toolName === "revise_profile") {
                   if (!options.maintain) {
                     denied.push(event.toolName);
@@ -313,7 +455,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
                   return;
                 }
                 if (
-                  !TOOL_NAMES.some((name) => name === event.toolName) ||
+                  !availableNames.includes(event.toolName) ||
                   !isToolAllowed(config.tools, event.toolName)
                 ) {
                   denied.push(event.toolName);
@@ -324,8 +466,9 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
                 }
               });
               pi.on("before_provider_request", () => {
+                lastStatus = undefined;
                 runtime.current();
-                if (++requests > 12)
+                if (++requests > limits.maxRequests)
                   controller.abort(
                     new Error("Profile turn request limit reached."),
                   );
@@ -334,6 +477,9 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           ],
         });
         await loader.reload();
+        const prompts = loader.getPrompts();
+        if (prompts.diagnostics.length)
+          throw new Error("Configured prompt templates are invalid.");
         if (loader.getExtensions().errors.length)
           throw new Error("Profile policy could not load.");
         const manager = options.newSession
@@ -342,7 +488,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         if (
           Buffer.byteLength(
             JSON.stringify(manager.buildSessionContext().messages),
-          ) > 131072
+          ) > limits.maxHistoryBytes
         ) {
           throw new Error(
             "Profile history limit reached; start a new session.",
@@ -353,9 +499,11 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           agentDir,
           modelRuntime,
           model,
-          thinkingLevel: "off",
+          thinkingLevel: selection.thinking,
           tools: [...visible],
-          excludeTools: TOOL_NAMES.filter((name) => !toolNames.includes(name)),
+          excludeTools: availableNames.filter(
+            (name) => !toolNames.includes(name),
+          ),
           customTools: options.maintain
             ? [proposalTool, revisionTool]
             : [proposalTool],
@@ -369,6 +517,17 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         signal.addEventListener("abort", abort, { once: true });
         const unsubscribe = session.subscribe((event) => {
           if (
+            event.type === "message_update" &&
+            [
+              "text_delta",
+              "thinking_delta",
+              "toolcall_start",
+              "toolcall_delta",
+            ].includes(event.assistantMessageEvent.type)
+          ) {
+            responseStarted = true;
+          }
+          if (
             event.type === "message_end" &&
             event.message.role === "assistant" &&
             event.message.stopReason === "length"
@@ -378,46 +537,83 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         });
         try {
           await session.bindExtensions({});
-          signal.throwIfAborted();
-          const previous = session.messages.length;
-          await session.prompt(request.prompt, {
-            expandPromptTemplates: false,
-          });
-          signal.throwIfAborted();
-          const answers = session.messages
-            .slice(previous)
-            .filter((message) => message.role === "assistant");
+          const actualTools = loader
+            .getExtensions()
+            .extensions.flatMap((extension) => [...extension.tools.keys()]);
           if (
-            answers.some(
-              (message) =>
-                message.stopReason === "error" ||
-                message.stopReason === "aborted",
-            )
-          ) {
+            actualTools.length !== installed.tools.length ||
+            actualTools.some((name) => !installed.tools.includes(name))
+          )
             throw new Error(
-              "Profile inference failed; private provider diagnostics omitted.",
+              "Installed extension tools do not match the operator catalog.",
             );
-          }
-          return {
-            profileId: profile.id,
-            model: config.model.id,
-            toolNames: visible,
-            denied,
-            sessionFile: session.sessionFile,
-            output: answers
-              .flatMap((message) =>
-                message.content
-                  .filter((block) => block.type === "text")
-                  .map((block) => block.text),
+          signal.throwIfAborted();
+          const startingLeaf = manager.getLeafId();
+          for (let index = 0; index < candidates.length; index++) {
+            selection = candidates[index]!;
+            if (index > 0) {
+              if (startingLeaf) manager.branch(startingLeaf);
+              else manager.resetLeaf();
+              session.refreshContext();
+              const next = modelRuntime.getModel(
+                selection.provider,
+                selection.id,
+              );
+              if (!next) throw new Error("Fallback model is unavailable.");
+              await session.setModel(next);
+              session.setThinkingLevel(selection.thinking);
+            }
+            attempts.push(selection.id);
+            const previous = session.messages.length;
+            await session.prompt(request.prompt, {
+              expandPromptTemplates: prompts.prompts.length > 0,
+            });
+            signal.throwIfAborted();
+            const answers = session.messages
+              .slice(previous)
+              .filter((message) => message.role === "assistant");
+            if (
+              answers.some(
+                (message) =>
+                  message.stopReason === "error" ||
+                  message.stopReason === "aborted",
               )
-              .join("\n"),
-          };
+            ) {
+              if (
+                !responseStarted &&
+                installed.factories.length === 0 &&
+                [429, 502, 503, 504].includes(lastStatus ?? 0) &&
+                index + 1 < candidates.length
+              )
+                continue;
+              throw new Error(
+                "Profile inference failed; private provider diagnostics omitted.",
+              );
+            }
+            return {
+              profileId: profile.id,
+              model: selection.id,
+              attempts,
+              toolNames: visible,
+              denied,
+              sessionFile: session.sessionFile,
+              output: answers
+                .flatMap((message) =>
+                  message.content
+                    .filter((block) => block.type === "text")
+                    .map((block) => block.text),
+                )
+                .join("\n"),
+            };
+          }
+          throw new Error("Profile model candidates exhausted.");
         } finally {
           unsubscribe();
           signal.removeEventListener("abort", abort);
           session.dispose();
         }
       } finally {
+        clearTimeout(deadline);
         await lock.close();
         await unlink(lockPath);
       }

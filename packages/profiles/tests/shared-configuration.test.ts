@@ -344,3 +344,112 @@ test("shared persona and mandatory tool denials also cover legacy profiles", () 
   assert.equal(isToolAllowed(effective.configuration.tools, "bash"), false);
   assert.equal(isToolAllowed(effective.configuration.tools, "read"), true);
 });
+
+test("operator catalog metadata is bounded, immutable, and rejects endpoints", () => {
+  const entry = {
+    id: "catalog-model",
+    api: "openai-responses",
+    contextWindow: 65536,
+    maxOutputTokens: 0,
+    reasoning: true,
+  };
+  const parsed = parseSharedConfiguration({ version: 2, models: [entry] });
+  assert.deepEqual(parsed.models, [entry]);
+  entry.contextWindow = 1;
+  assert.equal(parsed.models?.[0]?.contextWindow, 65536);
+  assert.ok(Object.isFrozen(parsed.models));
+  assert.ok(Object.isFrozen(parsed.models?.[0]));
+  for (const models of [
+    [],
+    [entry, entry],
+    Array(65).fill(entry),
+    [{ ...entry, api: "arbitrary-api" }],
+    [{ ...entry, contextWindow: 0 }],
+    [{ ...entry, maxOutputTokens: -1 }],
+    [{ ...entry, api: "anthropic-messages", maxOutputTokens: 0 }],
+    [{ ...entry, contextWindow: 1.5 }],
+    [{ ...entry, reasoning: "yes" }],
+    [{ ...entry, baseUrl: "https://example.com" }],
+  ]) {
+    assert.throws(
+      () => parseSharedConfiguration({ version: 2, models }),
+      errorCode("INVALID_SHARED_CONFIGURATION"),
+    );
+  }
+});
+
+test("turn limits merge shared defaults with bounded profile overrides", () => {
+  const shared = parseSharedConfiguration({
+    version: 2,
+    model: { provider: "cli-proxy", id: "test" },
+    limits: { maxRequests: 4, deadlineMs: 2000 },
+  });
+  const definition = parseProfileDefinition({
+    version: 2,
+    id: "minimal",
+    limits: { maxRequests: 2 },
+  });
+  const result = resolveEffectiveProfile(
+    { ...definition, home: "/synthetic/minimal", soul: "Test." },
+    shared,
+  );
+  assert.deepEqual(result.configuration.limits, {
+    deadlineMs: 2000,
+    maxRequests: 2,
+    maxHistoryBytes: 131072,
+  });
+  assert.ok(Object.isFrozen(result.configuration.limits));
+  for (const limits of [
+    { deadlineMs: 0 },
+    { deadlineMs: 180001 },
+    { maxRequests: 65 },
+    { maxRequests: 1.1 },
+    { maxHistoryBytes: 1023 },
+    { maxHistoryBytes: "1024" },
+    { unknown: 1 },
+  ]) {
+    assert.throws(
+      () => parseSharedConfiguration({ version: 2, limits }),
+      errorCode("INVALID_SHARED_CONFIGURATION"),
+    );
+    assert.throws(() =>
+      parseProfileDefinition({ version: 2, id: "minimal", limits }),
+    );
+  }
+});
+
+test("extension catalog freezes exact integrity and rejects aliases or duplicate tools", () => {
+  const entry = {
+    id: "fixture",
+    sha256: "0".repeat(64),
+    tools: ["fixture_probe"],
+  };
+  const parsed = parseSharedConfiguration({
+    version: 2,
+    extensionCatalog: [entry],
+  });
+  entry.tools.push("another_tool");
+  assert.deepEqual(parsed.extensionCatalog?.[0]?.tools, ["fixture_probe"]);
+  assert.ok(Object.isFrozen(parsed.extensionCatalog?.[0]?.tools));
+  for (const entries of [
+    [],
+    [entry, entry],
+    [{ ...entry, id: "../fixture" }],
+    [{ ...entry, sha256: "0".repeat(64) + "\n" }],
+    [{ ...entry, tools: ["*"] }],
+    [{ ...entry, path: "https://example.com/plugin.mjs" }],
+    [entry, { ...entry, id: "second" }],
+  ]) {
+    assert.throws(
+      () => parseSharedConfiguration({ version: 2, extensionCatalog: entries }),
+      errorCode("INVALID_SHARED_CONFIGURATION"),
+    );
+  }
+  assert.throws(() =>
+    parseProfileDefinition({
+      version: 2,
+      id: "profile",
+      resources: { extensions: ["../fixture"] },
+    }),
+  );
+});

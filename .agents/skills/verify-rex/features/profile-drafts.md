@@ -8,8 +8,8 @@ The agent entry is a `profile: profile-builder` request using `propose_profile`.
 
 ## Repeatable checks
 
-- Run `node --import tsx --test packages/pi-profiles/tests/adapter.test.ts packages/pi-profiles/tests/admission.test.ts` for an actual builder tool loop, validation, model inheritance, provenance-bound create/update admission, whole-bundle digests and rejection cases.
-- Run `npm run verify -- sandbox` for actual builder-tool draft creation in private storage, the read-only selected definition mount, source-bound networkless operator helper, rejected forged update provenance, wrong-digest rejection, exact admission and a successful worker request for the new profile.
+- Run `node --import tsx --test packages/pi-profiles/tests/adapter.test.ts packages/pi-profiles/tests/admission.test.ts` for an actual builder tool loop, validation, model inheritance, provenance-bound create/update admission, whole-bundle digests and rejection cases, including SOUL-only maintenance that preserves shared inheritance.
+- Run `npm run verify -- sandbox` for actual builder-tool draft creation in private storage, the read-only selected definition mount, source-bound networkless operator helper, rejected forged update provenance, wrong-digest rejection, exact admission and a successful worker request for the new profile. The suite also revises a SOUL-only profile, approves its digest, and checks the new instruction on a fresh worker session.
 
 ## Expected observations
 
@@ -20,3 +20,5 @@ Observe the active definitions, not the model's claim that a profile was created
 ## Gotchas and coverage limits
 
 The installed create path binds the origin to the builder's actual volume, not mutable provenance text. `approve-update` binds the origin to that profile's own volume and rejects added tools. Other workers cannot access either volume. Review/approval locks the source profile, then snapshots and validates the exact reviewed content. Tests use only invented operator authority, never normal drafts or active profiles. Do not repair a broken real draft or weaken its permissions to make admission pass.
+
+Instruction resources: SDK tests require shared and own text on the wire, no neighboring-file discovery, maintenance preservation, changed-resource digest refusal and activation of reviewed bytes. Shared text changes make pending updates stale. Installed acceptance exercises resource-bearing SOUL maintenance through the operator snapshot helper. Empty own lists cannot remove required shared instructions.

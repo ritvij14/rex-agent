@@ -5,6 +5,7 @@ import {
   ProfileError,
   validateProfileId,
 } from "@rex/profiles";
+import { writeResourceFiles } from "@rex/pi-profiles/proposals";
 import { join } from "node:path";
 
 export async function provisionProfile(
@@ -31,7 +32,7 @@ export async function provisionProfile(
   await mkdir(home);
   if (profile.soul) {
     await writeFile(join(home, "SOUL.md"), profile.soul);
-    if (profile.model || profile.tools) {
+    if (profile.model || profile.tools || profile.limits || profile.resources) {
       await writeFile(
         join(home, "profile.json"),
         JSON.stringify({
@@ -39,6 +40,8 @@ export async function provisionProfile(
           id,
           ...(profile.model ? { model: profile.model } : {}),
           ...(profile.tools ? { tools: profile.tools } : {}),
+          ...(profile.limits ? { limits: profile.limits } : {}),
+          ...(profile.resources ? { resources: profile.resources } : {}),
         }),
       );
     }
@@ -53,10 +56,12 @@ export async function provisionProfile(
       }),
     );
   }
+  await writeResourceFiles(home, profile.resourceFiles ?? []);
   if (shared) {
     const sharedHome = join(target, "shared");
     await mkdir(sharedHome);
-    const { soul, ...configuration } = shared;
+    const { soul, resourceFiles, ...configuration } = shared;
+    await writeResourceFiles(sharedHome, resourceFiles ?? []);
     await writeFile(
       join(sharedHome, "configuration.json"),
       JSON.stringify(configuration),

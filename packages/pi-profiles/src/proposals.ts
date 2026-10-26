@@ -8,9 +8,12 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import {
   loadSharedConfiguration,
+  validateResourceFiles,
+  resourcePaths,
+  type ResourceFile,
   lookupProfile,
   parseProfileDefinition,
   ProfileError,
@@ -18,7 +21,7 @@ import {
   type Profile,
   type ProfileDefinition,
 } from "@rex/profiles";
-import { narrowsTools, requireRunnable } from "./policy.ts";
+import { narrowsTools, operatorToolNames, requireRunnable } from "./policy.ts";
 
 export interface ProposalProvenance {
   readonly operation: "create" | "update";
@@ -37,6 +40,9 @@ function bundle(profile: Profile) {
       kind: "v1" as const,
       id: profile.id,
       configuration: profile.configuration,
+      ...(profile.resourceFiles
+        ? { resourceFiles: profile.resourceFiles }
+        : {}),
     };
   }
   if (!profile.soul) {
@@ -47,7 +53,10 @@ function bundle(profile: Profile) {
     id: profile.id,
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.tools ? { tools: profile.tools } : {}),
+    ...(profile.limits ? { limits: profile.limits } : {}),
     soul: profile.soul,
+    ...(profile.resources ? { resources: profile.resources } : {}),
+    ...(profile.resourceFiles ? { resourceFiles: profile.resourceFiles } : {}),
   };
 }
 
@@ -55,40 +64,49 @@ export function bundleDigest(profile: Profile) {
   return digestOf(JSON.stringify(bundle(profile)));
 }
 
-function definitionBundleDigest(definition: ProfileDefinition): string {
+function definitionBundleDigest(
+  definition: ProfileDefinition,
+  soul?: string,
+  resourceFiles?: readonly ResourceFile[],
+): string {
   if (definition.configuration) {
     return bundleDigest({
       id: definition.id,
       home: "",
       configuration: definition.configuration,
+      ...(resourceFiles ? { resourceFiles } : {}),
     });
   }
   return bundleDigest({
     id: definition.id,
     home: "",
+    ...(soul ? { soul } : {}),
     ...(definition.model ? { model: definition.model } : {}),
     ...(definition.tools ? { tools: definition.tools } : {}),
+    ...(definition.limits ? { limits: definition.limits } : {}),
+    ...(definition.resources ? { resources: definition.resources } : {}),
+    ...(resourceFiles ? { resourceFiles } : {}),
   });
+}
+
+async function readShared(profilesRoot: string) {
+  try {
+    return await loadSharedConfiguration(join(profilesRoot, "shared"));
+  } catch (error) {
+    if (
+      error instanceof ProfileError &&
+      error.code === "SHARED_CONFIGURATION_UNAVAILABLE"
+    )
+      return undefined;
+    throw error;
+  }
 }
 
 export async function sharedConfigurationDigest(
   profilesRoot: string,
 ): Promise<string | null> {
-  try {
-    return digestOf(
-      JSON.stringify(
-        await loadSharedConfiguration(join(profilesRoot, "shared")),
-      ),
-    );
-  } catch (error) {
-    if (
-      error instanceof ProfileError &&
-      error.code === "SHARED_CONFIGURATION_UNAVAILABLE"
-    ) {
-      return null;
-    }
-    throw error;
-  }
+  const shared = await readShared(profilesRoot);
+  return shared ? digestOf(JSON.stringify(shared)) : null;
 }
 
 async function root(path: string) {
@@ -169,11 +187,49 @@ export async function createProposal(
   proposalsRoot: string,
   input: unknown,
   provenance: { operation: "create" | "update"; origin: string },
+  soul?: string,
+  resourceFiles?: readonly ResourceFile[],
 ) {
   const definition = parseProfileDefinition(input);
-  requireRunnable(definition.configuration);
+  if (definition.version === 2) {
+    if (
+      typeof soul !== "string" ||
+      !soul.trim() ||
+      Buffer.byteLength(soul) > 16384
+    )
+      throw new Error("A bounded nonempty SOUL is required.");
+  } else {
+    if (soul !== undefined)
+      throw new Error("Legacy definitions cannot contain SOUL.");
+    if (definition.configuration?.model.provider !== "cli-proxy")
+      throw new Error(
+        "Profile configuration is not supported by this adapter.",
+      );
+  }
+  const paths = resourcePaths(
+    definition.configuration?.resources ?? definition.resources,
+  );
+  const files = validateResourceFiles(paths, resourceFiles ?? []);
+  const boundFiles =
+    (definition.configuration?.resources ?? definition.resources)
+      ? files
+      : undefined;
   const profiles = await root(profilesRoot);
   const proposals = await root(proposalsRoot);
+  const shared = await readShared(profilesRoot);
+  requireRunnable(
+    resolveEffectiveProfile(
+      {
+        ...definition,
+        home: "",
+        ...(soul ? { soul } : {}),
+        ...(boundFiles ? { resourceFiles: boundFiles } : {}),
+      },
+      shared,
+    ).configuration,
+    operatorToolNames(shared),
+  );
+
   if (
     !provenance ||
     typeof provenance.origin !== "string" ||
@@ -198,10 +254,12 @@ export async function createProposal(
       join(proposals, definition.id),
       definition,
       provenanceBound,
+      soul,
+      boundFiles,
     );
     return {
       id: definition.id,
-      digest: definitionBundleDigest(definition),
+      digest: definitionBundleDigest(definition, soul, boundFiles),
       operation: "create" as const,
     };
   }
@@ -222,10 +280,12 @@ export async function createProposal(
     join(proposals, definition.id),
     definition,
     provenanceBound,
+    soul,
+    boundFiles,
   );
   return {
     id: definition.id,
-    digest: definitionBundleDigest(definition),
+    digest: definitionBundleDigest(definition, soul, boundFiles),
     operation: "update" as const,
     baseDigest: provenanceBound.baseDigest,
   };
@@ -235,14 +295,20 @@ async function writeProposalFiles(
   home: string,
   definition: ProfileDefinition,
   provenance: ProposalProvenance,
+  soul?: string,
+  resourceFiles?: readonly ResourceFile[],
 ) {
   const text = definitionText(definition);
   try {
     await mkdir(home, { mode: 0o755 });
+    if (soul !== undefined) {
+      await writeFile(join(home, "SOUL.md"), soul, { flag: "wx", mode: 0o644 });
+    }
     await writeFile(join(home, "profile.json"), text, {
       flag: "wx",
       mode: 0o644,
     });
+    await writeResourceFiles(home, resourceFiles ?? []);
     await writeFile(join(home, "provenance.json"), JSON.stringify(provenance), {
       flag: "wx",
       mode: 0o644,
@@ -266,7 +332,10 @@ export async function reviewProposal(proposalsRoot: string, id: string) {
     );
   }
   if (profile.configuration) {
-    requireRunnable(profile.configuration);
+    if (profile.configuration.model.provider !== "cli-proxy")
+      throw new Error(
+        "Profile configuration is not supported by this adapter.",
+      );
   } else if (!profile.soul) {
     throw new Error("Profile configuration is not supported by this adapter.");
   }
@@ -304,19 +373,7 @@ export async function approveProposal(
       );
     }
     const current = await lookupProfile(profiles, id);
-    let sharedConfiguration;
-    try {
-      sharedConfiguration = await loadSharedConfiguration(
-        join(profiles, "shared"),
-      );
-    } catch (error) {
-      if (
-        !(error instanceof ProfileError) ||
-        error.code !== "SHARED_CONFIGURATION_UNAVAILABLE"
-      ) {
-        throw error;
-      }
-    }
+    const sharedConfiguration = await readShared(profilesRoot);
     const currentTools = resolveEffectiveProfile(current, sharedConfiguration)
       .configuration?.tools;
     const proposedTools = resolveEffectiveProfile(
@@ -326,13 +383,23 @@ export async function approveProposal(
     if (
       !currentTools ||
       !proposedTools ||
-      !narrowsTools(currentTools, proposedTools)
+      !narrowsTools(
+        currentTools,
+        proposedTools,
+        operatorToolNames(sharedConfiguration),
+      )
     ) {
       throw new Error("A profile revision cannot add tools.");
     }
   } else {
     await vacant(join(profiles, id));
   }
+  const sharedForAdmission = await readShared(profilesRoot);
+  requireRunnable(
+    resolveEffectiveProfile(reviewed.definition, sharedForAdmission)
+      .configuration,
+    operatorToolNames(sharedForAdmission),
+  );
   await activateBundle(profiles, id, reviewed.definition);
   await rm(join(proposals, id), { recursive: true, force: true });
   return { id, digest, operation: provenance.operation };
@@ -345,6 +412,7 @@ async function activateBundle(profiles: string, id: string, profile: Profile) {
   );
   await mkdir(staging, { mode: 0o755 });
   try {
+    await writeResourceFiles(staging, profile.resourceFiles ?? []);
     if (profile.soul) {
       await writeFile(join(staging, "SOUL.md"), profile.soul, {
         flag: "wx",
@@ -366,6 +434,8 @@ async function activateBundle(profiles: string, id: string, profile: Profile) {
               id: profile.id,
               ...(profile.model ? { model: profile.model } : {}),
               ...(profile.tools ? { tools: profile.tools } : {}),
+              ...(profile.limits ? { limits: profile.limits } : {}),
+              ...(profile.resources ? { resources: profile.resources } : {}),
             }),
           ),
       { flag: "wx", mode: 0o644 },
@@ -395,5 +465,22 @@ async function activateBundle(profiles: string, id: string, profile: Profile) {
   }
   if (retired) {
     await rm(retired, { recursive: true, force: true });
+  }
+}
+
+export async function writeResourceFiles(
+  home: string,
+  files: readonly ResourceFile[],
+) {
+  const validated = validateResourceFiles(
+    files.map((file) => file.path),
+    files,
+  );
+  for (const file of validated) {
+    await mkdir(dirname(join(home, file.path)), { recursive: true });
+    await writeFile(join(home, file.path), file.text, {
+      flag: "wx",
+      mode: 0o644,
+    });
   }
 }

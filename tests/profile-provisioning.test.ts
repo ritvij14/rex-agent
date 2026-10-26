@@ -50,6 +50,39 @@ test("provisioning copies only selected validated config and shared policy", asy
     (await loadSharedConfiguration(join(target, "shared"))).soul,
     "Common instructions.",
   );
+  await writeFile(
+    join(source, "coding", "profile.json"),
+    JSON.stringify({ version: 2, id: "coding", limits: { maxRequests: 2 } }),
+  );
+  await provisionProfile(source, target, "coding");
+  assert.deepEqual((await lookupProfile(target, "coding")).limits, {
+    maxRequests: 2,
+  });
+  await mkdir(join(source, "coding", "resources"));
+  await writeFile(
+    join(source, "coding", "resources", "own.md"),
+    "Own resource.",
+  );
+  await writeFile(
+    join(source, "coding", "resources", "ignored.md"),
+    "Not selected.",
+  );
+  await writeFile(
+    join(source, "coding", "profile.json"),
+    JSON.stringify({
+      version: 2,
+      id: "coding",
+      resources: { instructions: ["resources/own.md"] },
+    }),
+  );
+  await provisionProfile(source, target, "coding");
+  assert.equal(
+    await readFile(join(target, "coding", "resources", "own.md"), "utf8"),
+    "Own resource.",
+  );
+  await assert.rejects(
+    readFile(join(target, "coding", "resources", "ignored.md")),
+  );
   await assert.rejects(readFile(join(target, "research", "SOUL.md")));
   await assert.rejects(provisionProfile(source, target, "../research"));
   await rm(join(source, "coding", "SOUL.md"));

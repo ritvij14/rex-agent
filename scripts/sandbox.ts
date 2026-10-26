@@ -247,7 +247,8 @@ export function main(args: string[]): number {
         ...rest,
       ]);
     else if (command === "rex") {
-      const { newSession, maintain, input } = parseRexInput(rest);
+      const { newSession, maintain, modelOverride, input } =
+        parseRexInput(rest);
       const request = input ?? readRexInput();
       const { profileId } = parseProfileRequest(request);
       const result = runProfileWorker({
@@ -256,6 +257,7 @@ export function main(args: string[]): number {
         input: request,
         newSession,
         maintain,
+        modelOverride,
       });
       if (result.status !== 0) {
         console.error(

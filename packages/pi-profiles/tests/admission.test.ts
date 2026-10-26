@@ -347,3 +347,100 @@ test("provenance digests are stored verbatim and review reflects them", async (t
   assert.ok(stored.sharedDigest === null);
   void proposal;
 });
+
+test("SOUL limits participate in digest and survive activation", async (t) => {
+  const f = await fixture(t);
+  await seedShared(f.profilesRoot);
+  const proposal = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    { version: 2, id: "limited", limits: { maxRequests: 2 } },
+    CREATE,
+    "Limited persona.",
+  );
+  const manifest = join(f.proposalsRoot, "limited", "profile.json");
+  await writeFile(
+    manifest,
+    JSON.stringify({ version: 2, id: "limited", limits: { maxRequests: 3 } }),
+  );
+  await assert.rejects(
+    approveProposal(
+      f.profilesRoot,
+      f.proposalsRoot,
+      "limited",
+      proposal.digest,
+    ),
+    /digest/,
+  );
+  const changed = await reviewProposal(f.proposalsRoot, "limited");
+  await approveProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    "limited",
+    changed.digest,
+  );
+  assert.deepEqual((await lookupProfile(f.profilesRoot, "limited")).limits, {
+    maxRequests: 3,
+  });
+});
+
+test("shared instruction content changes invalidate an update approval", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "shared", "resources"), { recursive: true });
+  const config = {
+    version: 2,
+    resources: { instructions: ["resources/common.md"] },
+  };
+  await writeFile(
+    join(f.profilesRoot, "shared", "configuration.json"),
+    JSON.stringify(config),
+  );
+  const file = join(f.profilesRoot, "shared", "resources", "common.md");
+  await writeFile(file, "First shared instruction.");
+  const draft = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    v1Draft("helper", "Revised persona."),
+    UPDATE("helper"),
+  );
+  await writeFile(file, "Changed shared instruction.");
+  await assert.rejects(
+    approveProposal(f.profilesRoot, f.proposalsRoot, "helper", draft.digest),
+    /shared configuration changed/,
+  );
+  assert.equal(
+    (await lookupProfile(f.profilesRoot, "helper")).configuration?.instructions,
+    "Original persona.",
+  );
+});
+
+test("update approval cannot add an operator catalog custom tool", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "shared"));
+  await writeFile(
+    join(f.profilesRoot, "shared", "configuration.json"),
+    JSON.stringify({
+      version: 2,
+      extensionCatalog: [
+        { id: "fixture", sha256: "0".repeat(64), tools: ["fixture_probe"] },
+      ],
+    }),
+  );
+  const input = v1Draft("helper", "Expanded custom tools.");
+  input.configuration.tools.whitelist.push("fixture_probe");
+  const proposal = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    input,
+    UPDATE("helper"),
+  );
+  await assert.rejects(
+    approveProposal(f.profilesRoot, f.proposalsRoot, "helper", proposal.digest),
+    /add tools/,
+  );
+  assert.deepEqual(
+    (await lookupProfile(f.profilesRoot, "helper")).configuration?.tools
+      .whitelist,
+    ["read"],
+  );
+});

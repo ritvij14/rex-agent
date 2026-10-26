@@ -2,7 +2,11 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { closeSync, openSync, readSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseProfileRequest, validateProfileId } from "@rex/profiles";
+import {
+  parseProfileArguments,
+  parseProfileRequest,
+  validateProfileId,
+} from "@rex/profiles";
 
 export const NODE = [
   "node",
@@ -22,19 +26,7 @@ const HELPER_LIMITS = [
   "64",
 ];
 
-export function parseRexInput(args: string[]) {
-  const rest = [...args];
-  let newSession = false;
-  let maintain = false;
-  while (rest[0]?.startsWith("--")) {
-    if (rest[0] === "--new-session" && !newSession) newSession = true;
-    else if (rest[0] === "--maintain" && !maintain) maintain = true;
-    else throw new Error("Invalid profile arguments.");
-    rest.shift();
-  }
-  if (rest.length > 1) throw new Error("Invalid profile arguments.");
-  return { newSession, maintain, input: rest[0] ?? null };
-}
+export const parseRexInput = parseProfileArguments;
 
 export function readRexInput() {
   const buffer = Buffer.alloc(65537);
@@ -177,6 +169,7 @@ export function runProfileWorker(options: {
   input?: string;
   newSession?: boolean;
   maintain?: boolean;
+  modelOverride?: string;
   command?: string[];
 }) {
   validateProfileId(options.profile);
@@ -261,6 +254,8 @@ export function runProfileWorker(options: {
       });
       if (options.newSession && !options.command) args.push("--new-session");
       if (options.maintain && !options.command) args.push("--maintain");
+      if (options.modelOverride !== undefined && !options.command)
+        args.push("--model", options.modelOverride);
       return docker(args, options.input);
     } finally {
       // A killed Docker client is not proof that its worker stopped.

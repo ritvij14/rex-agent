@@ -110,6 +110,16 @@ test("project instructions and executable extensions are never inherited", async
     join(f.options.cwd, ".pi/extensions/untrusted.ts"),
     `throw new Error("synthetic-untrusted-extension-marker");`,
   );
+  await mkdir(join(f.options.cwd, ".pi/skills/stray"), { recursive: true });
+  await mkdir(join(f.options.cwd, ".pi/prompts"), { recursive: true });
+  await writeFile(
+    join(f.options.cwd, ".pi/skills/stray/SKILL.md"),
+    "---\nname: stray\ndescription: synthetic-untrusted-skill-marker\n---\nNot selected.",
+  );
+  await writeFile(
+    join(f.options.cwd, ".pi/prompts/stray.md"),
+    "synthetic-untrusted-template-marker",
+  );
   const result = await runProfileRequest({
     ...f.options,
     signal: AbortSignal.timeout(10000),

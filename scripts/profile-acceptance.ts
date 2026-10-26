@@ -17,6 +17,8 @@ const profiles = [
   "qa",
   "profile-builder",
   "soul-check",
+  "limits-check",
+  "extension-check",
   "synthetic-helper",
 ];
 
@@ -65,10 +67,13 @@ export function checkProfileAcceptance(project: string) {
     `${project}_profile-definitions:/profiles`,
     IMAGE,
     "-e",
-    `const f=require('node:fs'); f.mkdirSync('/profiles/shared');
-     f.writeFileSync('/profiles/shared/configuration.json', JSON.stringify({version:2,model:{provider:'cli-proxy',id:'synthetic-model'},tools:{whitelist:['*'],blacklist:[]}}));
+    `const f=require('node:fs'),crypto=require('node:crypto'); const extensionHash=crypto.createHash('sha256').update(f.readFileSync('/opt/rex/operator-extensions/fixture.mjs')).digest('hex'); f.mkdirSync('/profiles/shared');
+     f.writeFileSync('/profiles/shared/configuration.json', JSON.stringify({version:2,extensionCatalog:[{id:'fixture',sha256:extensionHash,tools:['fixture_probe']}],resources:{instructions:['resources/common.md']},limits:{deadlineMs:60000,maxRequests:4,maxHistoryBytes:131072},models:['synthetic-model','glm-5.3-flash-cloud','alternate-model'].map(id=>({id,api:'openai-completions',contextWindow:65536,maxOutputTokens:0,reasoning:id!=='glm-5.3-flash-cloud'})),model:{provider:'cli-proxy',id:'synthetic-model',thinking:'low',overrides:['alternate-model'],fallbacks:['alternate-model']},tools:{whitelist:['*'],blacklist:[]}}));
+     f.mkdirSync('/profiles/shared/resources'); f.writeFileSync('/profiles/shared/resources/common.md','Shared resource instruction.');
      f.writeFileSync('/profiles/shared/REX_SOUL.md','Common synthetic instructions.');
-     f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.');`,
+     f.mkdirSync('/profiles/extension-check'); f.writeFileSync('/profiles/extension-check/SOUL.md','Synthetic extension acceptance.'); f.writeFileSync('/profiles/extension-check/profile.json',JSON.stringify({version:2,id:'extension-check',resources:{extensions:['fixture']},tools:{whitelist:['read','ls','fixture_probe'],blacklist:['write','edit','bash','propose_profile']}}));
+     f.mkdirSync('/profiles/limits-check'); f.writeFileSync('/profiles/limits-check/SOUL.md','Limited synthetic profile.'); f.writeFileSync('/profiles/limits-check/profile.json',JSON.stringify({version:2,id:'limits-check',limits:{maxRequests:1}}));
+     f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.'); f.mkdirSync('/profiles/soul-check/resources'); f.writeFileSync('/profiles/soul-check/resources/own.md','Own resource instruction.'); f.writeFileSync('/profiles/soul-check/resources/ignored.md','Ignored resource text.'); f.mkdirSync('/profiles/soul-check/resources/skills/review',{recursive:true}); f.writeFileSync('/profiles/soul-check/resources/skills/review/SKILL.md','---\\nname: review\\ndescription: Selected synthetic skill description.\\n---\\nSKILL_BODY_AFTER_LOADING'); f.mkdirSync('/profiles/soul-check/resources/prompts'); f.writeFileSync('/profiles/soul-check/resources/prompts/review.md','synthetic-template $1'); f.writeFileSync('/profiles/soul-check/profile.json',JSON.stringify({version:2,id:'soul-check',resources:{workspaceInstructions:['AGENTS.md'],instructions:['resources/own.md'],skills:['resources/skills/review/SKILL.md'],prompts:['resources/prompts/review.md']}}));`,
   ]);
   requireSuccess(seed);
   const run = (
@@ -99,6 +104,17 @@ export function checkProfileAcceptance(project: string) {
     1,
     "a coding draft claiming builder origin must not enter builder intake",
   );
+  requireSuccess(
+    runProfileWorker({
+      project,
+      profile: "soul-check",
+      command: [
+        "node",
+        "-e",
+        "require('node:fs').writeFileSync('/workspace/AGENTS.md','Explicit selected workspace instruction.');",
+      ],
+    }),
+  );
   for (const id of [
     "coding",
     "research",
@@ -110,6 +126,71 @@ export function checkProfileAcceptance(project: string) {
     requireSuccess(answer);
     assert.match(answer.stdout, new RegExp(`profile=${id} model=`));
   }
+  const overridden = runProfileWorker({
+    project,
+    profile: "soul-check",
+    modelOverride: "alternate-model",
+    input: "profile: soul-check\nsynthetic-cap-free-response",
+  });
+  assert.match(
+    requireSuccess(overridden),
+    /profile=soul-check model=alternate-model/,
+  );
+  assert.match(
+    requireSuccess(run("soul-check", "synthetic-cap-free-response")),
+    /model=synthetic-model/,
+  );
+  assert.equal(
+    runProfileWorker({
+      project,
+      profile: "soul-check",
+      modelOverride: "glm-5.3-flash-cloud",
+      input: "profile: soul-check\nMust be denied",
+    }).status,
+    1,
+  );
+  requireSuccess(run("soul-check", "synthetic-skill-use", true));
+  assert.match(
+    requireSuccess(run("soul-check", "/review correctness", true)),
+    /synthetic-template-ok/,
+  );
+  requireSuccess(run("soul-check", "synthetic-workspace-instruction", true));
+  requireSuccess(run("soul-check", "synthetic-resource-instructions", true));
+  requireSuccess(run("soul-check", "synthetic-reasoning-low", true));
+  assert.equal(run("limits-check", "synthetic-write-marker", true).status, 1);
+  requireSuccess(
+    runProfileWorker({
+      project,
+      profile: "limits-check",
+      command: [
+        "node",
+        "-e",
+        "const a=require('node:assert/strict'),f=require('node:fs');a.equal(f.readFileSync('/workspace/model-marker.txt','utf8'),'synthetic-coding');",
+      ],
+    }),
+  );
+  requireSuccess(run("limits-check", "Recovered bounded turn", true));
+  requireSuccess(run("extension-check", "synthetic-extension-call", true));
+  requireSuccess(run("extension-check", "synthetic-extension-nested", true));
+  requireSuccess(
+    runProfileWorker({
+      project,
+      profile: "extension-check",
+      command: [
+        "node",
+        "-e",
+        "const f=require('node:fs'),a=require('node:assert/strict');a.equal(f.readFileSync('/workspace/extension-marker.txt','utf8'),'executed');a.equal(f.existsSync('/workspace/extension-forbidden.txt'),false);",
+      ],
+    }),
+  );
+  const fallbackAnswer = requireSuccess(
+    run("soul-check", "synthetic-fallback", true),
+  );
+  assert.match(fallbackAnswer, /model=alternate-model/);
+  assert.match(
+    fallbackAnswer,
+    /model-attempts=synthetic-model,alternate-model/,
+  );
   requireSuccess(run("coding", "synthetic-write-marker"));
   requireSuccess(run("coding", "synthetic-shell-isolation"));
   requireSuccess(run("research", "synthetic-read-foreign"));
@@ -336,6 +417,24 @@ export function checkProfileAcceptance(project: string) {
       .status,
     1,
   );
+  requireSuccess(run("soul-check", "synthetic-soul-update", true, true));
+  const soulRevision = JSON.parse(
+    requireSuccess(
+      operatorProfileCommand(project, "review-update", "soul-check"),
+    ),
+  );
+  assert.equal(soulRevision.definition.soul, "Synthetic revised instruction.");
+  assert.equal(soulRevision.definition.model, undefined);
+  assert.equal(soulRevision.definition.tools, undefined);
+  requireSuccess(
+    operatorProfileCommand(
+      project,
+      "approve-update",
+      "soul-check",
+      soulRevision.digest,
+    ),
+  );
+  requireSuccess(run("soul-check", "synthetic-revised-instruction", true));
   console.log(
     "PASS: installed profile workers, private volumes/configuration, real shell/tool denials, concurrency, truncation recovery, builder/operator admission and persistence.",
   );

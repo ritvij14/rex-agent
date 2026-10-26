@@ -123,3 +123,136 @@ test("profile selector is mandatory on the first line, not guessed from task tex
     );
   }
 });
+
+test("model override IDs survive validation without permitting endpoints", () => {
+  const input = definition();
+  const model = {
+    ...input.configuration.model,
+    overrides: ["alternate-model"],
+  };
+  const parsed = parseProfileDefinition({
+    ...input,
+    configuration: { ...input.configuration, model },
+  });
+  assert.deepEqual(parsed.configuration?.model, model);
+  assert.ok(Object.isFrozen(parsed.configuration?.model.overrides));
+  for (const overrides of [
+    ["!invalid"],
+    ["alternate-model", "alternate-model"],
+    Array(9).fill("a"),
+    "anything",
+  ]) {
+    assert.throws(() =>
+      parseProfileDefinition({
+        ...input,
+        configuration: {
+          ...input.configuration,
+          model: { ...model, overrides },
+        },
+      }),
+    );
+  }
+});
+
+test("selection refuses request overrides without an operator catalog", async () => {
+  const { selectProfileModel } = await import("@rex/profiles");
+  const model = {
+    provider: "cli-proxy",
+    id: "primary",
+    overrides: ["alternate"],
+  };
+  assert.throws(
+    () => selectProfileModel(model, undefined, "alternate"),
+    /not allowed/,
+  );
+  assert.throws(() => selectProfileModel(model, [], "alternate"), /catalog/);
+  assert.equal(selectProfileModel(model).id, "primary");
+});
+
+test("fallback plans are ordered, bounded, and disabled by explicit selection", async () => {
+  const { planProfileModels } = await import("@rex/profiles");
+  const model = {
+    provider: "cli-proxy",
+    id: "primary",
+    fallbacks: ["second", "third"],
+    overrides: ["third"],
+  };
+  const catalog = ["primary", "second", "third"].map((id) => ({
+    id,
+    api: "openai-completions" as const,
+    contextWindow: 32768,
+    maxOutputTokens: 0,
+    reasoning: false,
+  }));
+  assert.deepEqual(
+    planProfileModels(model, catalog).map((m) => m.id),
+    ["primary", "second", "third"],
+  );
+  assert.deepEqual(
+    planProfileModels(model, catalog, "third").map((m) => m.id),
+    ["third"],
+  );
+  assert.throws(() => planProfileModels(model), /catalog/);
+  assert.throws(() => planProfileModels(model, catalog.slice(0, 2)), /catalog/);
+  for (const fallbacks of [
+    ["primary"],
+    ["second", "second"],
+    ["!bad"],
+    Array(5).fill("x"),
+  ]) {
+    const input = definition();
+    assert.throws(() =>
+      parseProfileDefinition({
+        ...input,
+        configuration: {
+          ...input.configuration,
+          model: { ...model, fallbacks },
+        },
+      }),
+    );
+  }
+});
+
+test("thinking levels are explicit and require catalog capability", async () => {
+  const { planProfileModels } = await import("@rex/profiles");
+  const input = definition();
+  const metadata = {
+    id: input.configuration.model.id,
+    api: "openai-completions" as const,
+    contextWindow: 32768,
+    maxOutputTokens: 0,
+    reasoning: true,
+  };
+  for (const thinking of ["off", "minimal", "low", "medium", "high"] as const) {
+    const parsed = parseProfileDefinition({
+      ...input,
+      configuration: {
+        ...input.configuration,
+        model: { ...input.configuration.model, thinking },
+      },
+    });
+    assert.equal(
+      planProfileModels(parsed.configuration!.model, [metadata])[0]!.thinking,
+      thinking,
+    );
+    if (thinking !== "off")
+      assert.throws(
+        () =>
+          planProfileModels(parsed.configuration!.model, [
+            { ...metadata, reasoning: false },
+          ]),
+        /reasoning/,
+      );
+  }
+  for (const thinking of ["auto", "max", "", 1, null]) {
+    assert.throws(() =>
+      parseProfileDefinition({
+        ...input,
+        configuration: {
+          ...input.configuration,
+          model: { ...input.configuration.model, thinking },
+        },
+      }),
+    );
+  }
+});

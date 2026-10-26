@@ -321,6 +321,7 @@ test("sandbox build context permits only named public runtime files", () => {
     "!runtime.ts",
     "!verify.ts",
     "!provision.ts",
+    "!fixture-extension.mjs",
     "!pi.sh",
     "!profiles/",
     "!profiles/coding/",
@@ -338,6 +339,7 @@ test("sandbox build context permits only named public runtime files", () => {
       "pi-profiles",
       [
         "index.ts",
+        "installed-extensions.ts",
         "policy.ts",
         "proposals.ts",
         "cli.ts",
@@ -528,4 +530,27 @@ test("a held operator lock rejects work without deleting the existing lock", () 
   } finally {
     rmSync(path);
   }
+});
+
+test("model override flags remain explicit and reject duplicates", () => {
+  assert.deepEqual(
+    parseRexInput([
+      "--model",
+      "alternate-model",
+      "--maintain",
+      "profile: coding\nHi",
+    ]),
+    {
+      newSession: false,
+      maintain: true,
+      modelOverride: "alternate-model",
+      input: "profile: coding\nHi",
+    },
+  );
+  for (const args of [
+    ["--model"],
+    ["--model", "--maintain"],
+    ["--model", "a", "--model", "b"],
+  ])
+    assert.throws(() => parseRexInput(args));
 });

@@ -1,7 +1,11 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { approveProposal, reviewProposal } from "./proposals.ts";
+import {
+  approveProposal,
+  reviewProposal,
+  writeResourceFiles,
+} from "./proposals.ts";
 
 async function main() {
   if (process.getuid?.() !== 0) throw new Error();
@@ -40,9 +44,12 @@ async function main() {
                 id,
                 ...(profile.model ? { model: profile.model } : {}),
                 ...(profile.tools ? { tools: profile.tools } : {}),
+                ...(profile.limits ? { limits: profile.limits } : {}),
+                ...(profile.resources ? { resources: profile.resources } : {}),
               },
         ),
       );
+      await writeResourceFiles(home, profile.resourceFiles ?? []);
       if (profile.soul) await writeFile(join(home, "SOUL.md"), profile.soul);
       await writeFile(
         join(home, "provenance.json"),

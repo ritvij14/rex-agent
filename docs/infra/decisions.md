@@ -253,3 +253,71 @@
 **Reason:** an existing profile must be able to propose its own change without being able to edit another profile, shared settings, or its own permissions. The operator still approves the exact digest.
 
 **Verification:** a forced call without the flag writes nothing. A foreign id and an added tool are rejected. Approval of an added tool fails and preserves the active profile. Disposable acceptance drafts a coding revision, rejects a wrong digest and a busy profile, activates the exact digest, and sees the new instruction on a new session.
+
+**SOUL maintenance correction:** the initial maintenance implementation accepted only legacy inline configurations. Version-2 maintenance now writes and hashes the profile's own SOUL text while preserving omitted model/tool overrides. The regression failed because no draft existed after the tool call; SDK approval/fresh-session and installed-worker checks cover the corrected path.
+
+## 026: Operator-owned relay model metadata
+
+**Decision:** an optional shared `models` catalog declares exact model IDs, supported relay API, context window, per-model output limit, and reasoning capability. Unknown catalog models fail before inference. Do not accept endpoints, headers, credentials, or arbitrary Pi settings. Existing profiles without a catalog retain compatibility defaults. Reasoning capability does not enable thinking by itself.
+
+**Reason:** a model ID alone cannot tell the adapter which protocol or limits to use. Per-model metadata avoids treating every model as OpenAI chat completions without imposing one universal output cap. Anthropic needs an explicit positive output limit and an origin base URL; OpenAI uses the `/v1` base URL.
+
+**Verification:** a core catalog parse failed before the schema change; the adapter limit assertion failed before metadata was used. SDK tests inspect actual output limits and missing-model refusal, plus real Anthropic SSE handling and request path. Container acceptance provisions the catalog into isolated workers. Override selection and safe fallback are subsequent U5 units, not claims of this catalog change.
+
+## 027: Request model overrides require two approvals in configuration
+
+**Decision:** a request may select a model only when its ID is in both the selected model reference's bounded `overrides` list and the operator-owned shared catalog. CLI `--model` and SDK `modelOverride` do not change the next request's default or a draft's inherited model. Host and worker CLI flags share one parser. No model is selected from prompt text.
+
+**Reason:** the catalog describes available metadata, not permission for every profile to select every model. A one-turn choice must not become a persistent profile change.
+
+**Verification:** schema/flag tests failed before overrides existed. SDK checks inspect the actual wire ID, unchanged definition bytes, denial before inference, and return to the default. Installed worker acceptance checks allowed selection, denial of another catalog model, and the subsequent default. Fallback remains a separate behavior.
+
+## 028: Fall back only before a response or tool action
+
+**Decision:** permit up to four ordered catalog-approved fallback IDs for a configured primary. An explicit request override disables fallback. Qualifying failures are structured HTTP 429/502/503/504 only, before text/thinking/tool-call content or any tool execution. A per-runtime injected fetch observes status even when Pi's successful-response hook does not fire for an error. Never parse private error bodies to authorize retries.
+
+**State:** each candidate shares policy, lock, cancellation, deadline, and total request budget. Branch the session manager back to the pre-request leaf, refresh context, and record the next model before retrying. This avoids a duplicated prompt or failed assistant message in active context. Return/print ordered attempts; next request uses the primary with retained successful context.
+
+**Verification:** the regression first failed schema validation, then inference on the initial 503, then passed after retry wiring. A temporary diagnostic showed Pi's response hook omitted the failed HTTP status; injected fetch corrected the observation and the diagnostic was removed. Tests prohibit fallback after a real write, authentication errors, truncation, explicit override failure, or exhausted candidates. Installed acceptance checks a local 503 and selected model/attempt order. Live QA uses a controlled local failure followed by actual Haiku, not a claimed live provider outage.
+
+## 029: Reasoning controls require catalog capability
+
+**Decision:** model references may configure thinking off/minimal/low/medium/high, default off. Every selected/fallback candidate must declare reasoning capability for non-off levels; reject unsupported plans before inference. Pass the configured level to Pi and reapply it after fallback model selection. Do not infer capability from an ID or enable thinking because metadata merely says it is available.
+
+**Verification:** configured-thinking regression failed before the schema accepted the field. Core tests reject unsupported levels/capabilities; SDK assertions inspect low reasoning_effort on primary and fallback requests; installed SOUL acceptance checks the same field. Haiku live QA checks accepted request/tool/fresh-session behavior, not hidden provider reasoning or quality.
+
+## 030: Per-turn limits are bounded configuration
+
+**Decision:** shared limits provide fieldwise defaults; profile limits override them (legacy configuration.limits, version-2 top-level limits). Preserve the previous defaults. Hard bounds: deadline 100–180000 ms, requests 1–64, loaded-history JSON bytes 1024–1048576. The SDK timer includes setup/inference/tools/fallback after lock acquisition; external cancellation may stop it sooner. The host worker keeps its separate 240-second bound. Limits are digest-covered and not exposed as self-maintenance tool parameters.
+
+**Verification:** schema merge failed before limits were supported; a tool-loop limit test failed with missing rejection before runtime enforcement. Source checks prove bounded writes/request abortion, stalled-provider cancellation, history refusal before inference, lock recovery, snapshot preservation and limits digest sensitivity. Installed acceptance observes a one-request worker abort after a completed write, inspects the file, and starts a fresh successful session. No rollback of completed actions is claimed.
+
+## 031: Instruction references bind selected text to approval
+
+**Decision:** shared and per-profile resources.instructions contains ordered bounded resources/*.md references relative to its own directory. Core lookup loads/freeze only selected files, rejecting traversal and symlinks. Effective order is shared persona, required shared files, own persona, own files. Provisioning copies only validated selected text. Manifest references and file content participate in whole-bundle digests; shared content participates in stale-update checks. Maintenance preserves references/content, not concatenated instructions or a discovered directory.
+
+**Writing:** trusted createProposal callers supply resource text records as a separate sixth argument; validate exact ordered reference matches before any write. The public adapter proposals subpath shares instruction-file writing between activation, operator snapshots, and provisioning, whose destinations are new/cleared operator-controlled directories. The model tool does not create arbitrary resource paths or executable code.
+
+**Verification:** SDK regression failed shared schema validation before wiring, then passed shared/own prompt composition, ignored-neighbor exclusion, maintenance, changed-resource digest rejection and exact activation. Shared-file changes invalidate an update. Installed acceptance exercises resource snapshots and resource-bearing SOUL approval. Live Haiku verifies real maintenance and preserved files in an isolated disposable container. Skills/prompts/extensions are not implied by instruction-file support.
+
+## 032: Skills and templates use explicit digest-bound Markdown
+
+**Decision:** resources.skills and resources.prompts join explicit instruction refs under one bounded text bundle. Skills require SKILL.md metadata and an allowed read tool. Supply only selected skill paths with includeDefaults false, and explicit template paths with default discovery disabled. Advertise skill metadata lazily, support explicit skill commands and selected template argument expansion. Shared names cannot be silently shadowed; malformed/colliding metadata fails closed. Keep execution policy authoritative over skill text.
+
+**Verification:** selected-skill regression failed schema validation before support. SDK tests distinguish metadata from lazy body, actual read results, ignored neighbor/workspace resources, template arguments and denied write actions. Invalid/colliding metadata stops inference. Installed worker drives selected skill read and template expansion with copied resource snapshots. Live Haiku evidence inspects a successful read tool result plus exact skill/template output. This slice does not install packages or executable skill helpers.
+
+## 033: Workspace instructions require explicit path opt-in
+
+**Decision:** resources.workspaceInstructions names bounded relative Markdown files in the selected own workspace. Shared refs remain required; union them with own refs and read once under the turn lock. No ancestor discovery or implicit conventional filenames. Freeze text for that turn; later turns may see changed project files. Reject links, traversal, whitespace references and missing/invalid files. Reuse bounded text validation and redact path diagnostics.
+
+**Approval boundary:** workspace instruction references are part of the approved manifest digest, but mutable workspace content is not an active-definition bundle. This is an explicit dynamic-context opt-in, not authority to execute code or grant tools. Operator-launched workers provide own-workspace isolation; the SDK does not sandbox arbitrary caller paths.
+
+**Verification:** opt-in regression initially failed schema validation; it now proves absence before configuration, selected system text, immutability across a real write in the current turn, and refresh on the next turn. Core negatives cover traversal/symlinks/whitespace/missing files. Installed worker and isolated live Haiku use an invented own-workspace file, not host project instructions.
+
+## 034: Executable extensions are operator-installed integrity references
+
+**Decision:** shared extensionCatalog binds bounded IDs to SHA-256 and tool names. Explicit shared/profile resources.extensions selects only those IDs. SDK installedExtensionsRoot is trusted caller input; CLI fixes the immutable image root. Preflight every selected regular bounded module and digest before importing any native MJS factory. Do not scan profile/workspace code, install packages, accept URLs/commands, or replace reserved tools. Actual registered names must match the operator catalog. Custom and nested tool calls retain execution policy; update approval cannot expand custom-tool grants.
+
+**Trust:** installed code has process authority and may have side effects outside model tool dispatch. Review and pin dependencies and keep code immutable; entry hash does not seal transitive imports. Worker OS mounts provide profile isolation, not the SDK. Rex starts no service merely by loading a reference; trusted extensions must obey the same factory lifecycle rule. Disable fallback with executable extensions, since their request hooks may have performed side effects before any model content appears.
+
+**Verification:** schema regression failed before catalog support. SDK observes denied/allowed custom tool effects, hash mutation refusal, missing root, symlink, full-preflight-before-import, registration mismatch and nested blacklist denial. A hook-replay regression failed missing rejection, then passed with one HTTP request and one hook write. Installed fixture and real Haiku produce an inspected marker and a failed nested write without a target file. No normal profile/module selection or gateway configuration is changed.

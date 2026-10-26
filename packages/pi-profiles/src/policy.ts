@@ -2,6 +2,7 @@ import {
   isToolAllowed,
   type ProfileConfiguration,
   type ToolPolicy,
+  type SharedConfiguration,
 } from "@rex/profiles";
 
 export const TOOL_NAMES = [
@@ -13,18 +14,36 @@ export const TOOL_NAMES = [
   "propose_profile",
 ] as const;
 
-export function narrowsTools(current: ToolPolicy, proposed: ToolPolicy) {
-  return TOOL_NAMES.every(
+export function operatorToolNames(
+  shared?: SharedConfiguration,
+): readonly string[] {
+  return [
+    ...new Set<string>([
+      ...TOOL_NAMES,
+      ...(shared?.extensionCatalog?.flatMap((entry) => [...entry.tools]) ?? []),
+    ]),
+  ];
+}
+
+export function narrowsTools(
+  current: ToolPolicy,
+  proposed: ToolPolicy,
+  names: readonly string[] = TOOL_NAMES,
+) {
+  return names.every(
     (name) => !isToolAllowed(proposed, name) || isToolAllowed(current, name),
   );
 }
 
-export function requireRunnable(config?: ProfileConfiguration) {
+export function requireRunnable(
+  config?: ProfileConfiguration,
+  names: readonly string[] = TOOL_NAMES,
+) {
   if (
     !config ||
     config.model.provider !== "cli-proxy" ||
     [...config.tools.whitelist, ...config.tools.blacklist].some(
-      (name) => name !== "*" && !TOOL_NAMES.some((tool) => tool === name),
+      (name) => name !== "*" && !names.includes(name),
     )
   ) {
     throw new Error("Profile configuration is not supported by this adapter.");

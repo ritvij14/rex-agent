@@ -1,20 +1,16 @@
 import { readdir } from "node:fs/promises";
-import { parseProfileRequest } from "@rex/profiles";
+import { parseProfileArguments, parseProfileRequest } from "@rex/profiles";
 import { IncompleteProfileResponseError, runProfileRequest } from "./index.ts";
 
 async function main() {
-  const args = process.argv.slice(2);
-  let newSession = false;
-  let maintain = false;
-  while (args[0]?.startsWith("--")) {
-    if (args[0] === "--new-session" && !newSession) newSession = true;
-    else if (args[0] === "--maintain" && !maintain) maintain = true;
-    else throw new Error();
-    args.shift();
-  }
-  if (args.length > 1) throw new Error();
-  let input = args[0] ?? "";
-  if (!args.length) {
+  const {
+    newSession,
+    maintain,
+    modelOverride,
+    input: argument,
+  } = parseProfileArguments(process.argv.slice(2));
+  let input = argument ?? "";
+  if (argument === null) {
     const chunks: Buffer[] = [];
     let length = 0;
     for await (const chunk of process.stdin) {
@@ -39,9 +35,12 @@ async function main() {
     input,
     newSession,
     maintain,
-    signal: AbortSignal.timeout(90000),
+    modelOverride,
+    installedExtensionsRoot: "/opt/rex/operator-extensions",
   });
   console.log(`[profile=${result.profileId} model=${result.model}]`);
+  if (result.attempts.length > 1)
+    console.log(`[model-attempts=${result.attempts.join(",")}]`);
   console.log(result.output);
 }
 

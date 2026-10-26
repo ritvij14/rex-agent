@@ -6,29 +6,48 @@ import { isAbsolute, join } from "node:path";
 
 import {
   parseProfileDefinition,
+  parseResourceConfiguration,
+  resourcePaths,
+  validateResourceFiles,
   parseSharedConfiguration,
   validateProfileId,
+  type ExtensionCatalogEntry,
+  type CatalogModel,
   type ModelReference,
   type ProfileConfiguration,
   type ProfileDefinition,
   type SharedConfiguration,
   type ToolPolicy,
+  type TurnLimits,
+  type ResourceConfiguration,
+  type ResourceFile,
 } from "./configuration.ts";
 import { ProfileError } from "./errors.ts";
 export { ProfileError, type ProfileErrorCode } from "./errors.ts";
 export {
+  DEFAULT_TURN_LIMITS,
+  validateResourceFiles,
+  resourcePaths,
   isToolAllowed,
   parseProfileDefinition,
+  parseProfileArguments,
+  selectProfileModel,
+  planProfileModels,
   parseProfileRequest,
   parseSharedConfiguration,
   resolveEffectiveProfile,
   validateProfileId,
+  type ExtensionCatalogEntry,
+  type CatalogModel,
   type ModelReference,
   type ProfileConfiguration,
   type ProfileDefinition,
   type ProfileVersion,
   type SharedConfiguration,
   type ToolPolicy,
+  type TurnLimits,
+  type ResourceConfiguration,
+  type ResourceFile,
 } from "./configuration.ts";
 
 const DEFINITION_LIMIT = 4096;
@@ -41,6 +60,9 @@ export interface Profile {
   readonly configuration?: ProfileConfiguration;
   readonly model?: ModelReference;
   readonly tools?: ToolPolicy;
+  readonly limits?: TurnLimits;
+  readonly resources?: ResourceConfiguration;
+  readonly resourceFiles?: readonly ResourceFile[];
 }
 
 function validateRoot(root: string): string {
@@ -130,6 +152,10 @@ export async function lookupProfile(
     if (!parsed && !soulText) {
       throw new ProfileError("PROFILE_UNAVAILABLE");
     }
+    const resources = parsed?.configuration?.resources ?? parsed?.resources;
+    const resourceFiles = resources
+      ? await readInstructionResources(home, resourcePaths(resources))
+      : undefined;
     const soul = soulText;
     return Object.freeze({
       id,
@@ -137,6 +163,9 @@ export async function lookupProfile(
       ...(parsed?.configuration ? { configuration: parsed.configuration } : {}),
       ...(parsed?.model ? { model: parsed.model } : {}),
       ...(parsed?.tools ? { tools: parsed.tools } : {}),
+      ...(parsed?.limits ? { limits: parsed.limits } : {}),
+      ...(parsed?.resources ? { resources: parsed.resources } : {}),
+      ...(resourceFiles ? { resourceFiles } : {}),
       ...(soul ? { soul } : {}),
     });
   } catch (error) {
@@ -187,7 +216,14 @@ export async function loadSharedConfiguration(
     if (soul !== undefined && !soul.trim()) {
       throw new ProfileError("INVALID_SHARED_CONFIGURATION");
     }
-    return Object.freeze({ ...parsed, ...(soul ? { soul } : {}) });
+    const resourceFiles = parsed.resources
+      ? await readInstructionResources(home, resourcePaths(parsed.resources))
+      : undefined;
+    return Object.freeze({
+      ...parsed,
+      ...(soul ? { soul } : {}),
+      ...(resourceFiles ? { resourceFiles } : {}),
+    });
   } catch (error) {
     if (error instanceof ProfileError) throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -245,5 +281,58 @@ export class ProfileRuntime {
     if (!scope.active) throw new ProfileError("CLOSED_PROFILE_SCOPE");
     scope.signal?.throwIfAborted();
     return scope.profile;
+  }
+}
+
+export async function loadInstructionResources(
+  profilesRoot: string,
+  id: string,
+  paths: readonly string[],
+): Promise<readonly ResourceFile[]> {
+  const profile = await lookupProfile(profilesRoot, id);
+  return readInstructionResources(profile.home, paths);
+}
+
+async function readInstructionResources(
+  home: string,
+  paths: readonly string[],
+  workspace = false,
+): Promise<readonly ResourceFile[]> {
+  try {
+    const references = parseResourceConfiguration(
+      workspace ? { workspaceInstructions: paths } : { instructions: paths },
+    );
+    const result: ResourceFile[] = [];
+    for (const path of workspace
+      ? (references.workspaceInstructions ?? [])
+      : resourcePaths(references)) {
+      const parts = path.split("/");
+      let directory = home;
+      for (const part of parts.slice(0, -1)) {
+        directory = join(directory, part);
+        if (!(await lstat(directory)).isDirectory()) throw new Error();
+      }
+      const text = await readBounded(join(home, path), SOUL_LIMIT);
+      if (text === undefined) throw new Error();
+      result.push({ path, text });
+    }
+    return validateResourceFiles(paths, result, workspace);
+  } catch {
+    throw new Error("Instruction resource is unavailable or invalid.");
+  }
+}
+
+export async function loadWorkspaceInstructions(
+  workspaceRoot: string,
+  paths: readonly string[],
+): Promise<readonly ResourceFile[]> {
+  try {
+    return await readInstructionResources(
+      await realpath(validateRoot(workspaceRoot)),
+      paths,
+      true,
+    );
+  } catch {
+    throw new Error("Instruction resource is unavailable or invalid.");
   }
 }
