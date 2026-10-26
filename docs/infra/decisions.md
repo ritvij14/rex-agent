@@ -183,3 +183,13 @@
 **Security impact:** the external dependency is patched, but the separately embedded implementation in Pi's published CLI is unchanged. Do not equate cleared dependency alerts with a fully patched CLI. No TLS checks, network restrictions, credentials, scanner rules or profile permissions are relaxed. The changed NO_PROXY wildcard semantics require attention in deployments that explicitly use them; no private host configuration is imported or changed.
 
 **Verification and revisit:** regressions fail on the previous lockfiles/host install and check the fixed external version in both locks and actual host/container resolution while retaining Pi 1.3.0. Run full synthetic container acceptance before installation. Revisit the override when the Pi maintainers release a patched and rebuilt distribution; any removal or replacement requires the same installed-interface checks.
+
+## 019: Direct-main publication for solo work
+
+**Decision:** work on and push directly to main by default. Branches are for genuinely parallel work needing worktrees. Any other reason to avoid main must be explained through `ask_user_question`, with the owner deciding before a branch is created or used. The owner explicitly approved removing GitHub's mandatory PR and pre-merge status-check requirements to support this workflow.
+
+**Reason:** a mandatory branch/PR cycle adds overhead for a solo-maintained project without parallel work. The owner wants exceptions decided explicitly, not imposed by a generic agent workflow.
+
+**Security impact:** GitHub no longer blocks publication pending PR CI; CI runs after main pushes. Local verification, staged-content and history privacy checks, publication approval, read-only CI, and force-push/deletion protection remain required. Local hooks can be bypassed by a client, so this removes a server-side pre-publication gate rather than providing equivalent enforcement. Administrator enforcement remains enabled for the retained branch protections. No scanner or hook is weakened.
+
+**Verification:** inspect GitHub protection after the specifically approved removals, retain secret/private-content rejection coverage in the real installed-hook tests, run repository/history checks before pushing, then observe main CI. This supersedes the earlier mandatory-PR policy, not the other publication safeguards.
