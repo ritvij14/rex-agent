@@ -214,14 +214,19 @@ async function main() {
     { stdio: "pipe" },
   );
   assert.equal(denied.status, 1);
-  const proposal = await createProposal("/profiles", "/proposals", {
-    id: "synthetic-helper",
-    configuration: {
-      instructions: "A synthetic test helper.",
-      model: { provider: "cli-proxy", id: "glm-5.3-flash-cloud" },
-      tools: { whitelist: ["read"], blacklist: ["bash"] },
+  const proposal = await createProposal(
+    "/profiles",
+    "/proposals",
+    {
+      id: "synthetic-helper",
+      configuration: {
+        instructions: "A synthetic test helper.",
+        model: { provider: "cli-proxy", id: "glm-5.3-flash-cloud" },
+        tools: { whitelist: ["read"], blacklist: ["bash"] },
+      },
     },
-  });
+    { operation: "create", origin: "profile-builder" },
+  );
   await assert.rejects(lookupProfile("/profiles", proposal.id));
   await writeFile("/state/synthetic-proposal-digest.txt", proposal.digest);
   console.log(

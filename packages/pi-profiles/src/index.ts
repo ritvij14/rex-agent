@@ -24,6 +24,8 @@ export {
   createProposal,
   reviewProposal,
   approveProposal,
+  bundleDigest,
+  sharedConfigurationDigest,
 } from "./proposals.ts";
 export { TOOL_NAMES } from "./policy.ts";
 
@@ -183,6 +185,10 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
                     blacklist: params.blacklist,
                   },
                 },
+              },
+              {
+                operation: "create",
+                origin: profile.id,
               },
             );
             return {

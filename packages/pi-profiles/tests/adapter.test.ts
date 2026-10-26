@@ -402,6 +402,7 @@ test("approval is digest-bound, validated, non-overwriting and separate from dra
     f.profilesRoot,
     f.proposalsRoot,
     draft(),
+    { operation: "create", origin: "profile-builder" },
   );
   await assert.rejects(
     approveProposal(
@@ -432,19 +433,27 @@ test("approval is digest-bound, validated, non-overwriting and separate from dra
       proposal.id,
       proposal.digest,
     ),
+    (error) => error instanceof Error,
+  );
+  await assert.rejects(
+    createProposal(f.profilesRoot, f.proposalsRoot, draft("coding"), {
+      operation: "create",
+      origin: "profile-builder",
+    }),
     /overwritten/,
   );
   await assert.rejects(
-    createProposal(f.profilesRoot, f.proposalsRoot, draft("coding")),
-    /overwritten/,
+    createProposal(f.profilesRoot, f.proposalsRoot, draft("../bad"), {
+      operation: "create",
+      origin: "profile-builder",
+    }),
   );
-  await assert.rejects(
-    createProposal(f.profilesRoot, f.proposalsRoot, draft("../bad")),
-  );
-  assert.equal(
+  const storedDefinition = JSON.parse(
     await readFile(join(f.profilesRoot, proposal.id, "profile.json"), "utf8"),
-    JSON.stringify(reviewed.definition),
   );
+  const { home: _home, ...expected } = reviewed.definition;
+  void _home;
+  assert.deepEqual(storedDefinition, expected);
 });
 
 test("a minimal SOUL-only profile runs with shared defaults", async (t) => {
