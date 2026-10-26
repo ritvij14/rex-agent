@@ -15,6 +15,8 @@ Read `../principle-test-behavior-not-implementation/SKILL.md`.
 
 If a cheap deterministic test is impractical, use the closest useful executable reproduction and explain the gap. Do not build brittle mocks, broad fixtures or production-only infrastructure just to satisfy a slogan. Never label a test failing-before when it was only run after the fix.
 
+When the bug is one instance of a pattern, land the focused regression first, then look for the same fault elsewhere per `../bug-fix/SKILL.md`; fix instances inside scope and report the rest.
+
 For a flaky failure, first determine what changes between runs. Prefer an explicit state or controllable external response over sleeps and timing thresholds.
 
 Report the failing-before observation, passing-after observation, commands and remaining limits. Retain the regression or reusable reproduction so the next change can rerun it.

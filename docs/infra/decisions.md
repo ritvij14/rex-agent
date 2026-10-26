@@ -193,3 +193,15 @@
 **Security impact:** GitHub no longer blocks publication pending PR CI; CI runs after main pushes. Local verification, staged-content and history privacy checks, publication approval, read-only CI, and force-push/deletion protection remain required. Local hooks can be bypassed by a client, so this removes a server-side pre-publication gate rather than providing equivalent enforcement. Administrator enforcement remains enabled for the retained branch protections. No scanner or hook is weakened.
 
 **Verification:** inspect GitHub protection after the specifically approved removals, retain secret/private-content rejection coverage in the real installed-hook tests, run repository/history checks before pushing, then observe main CI. This supersedes the earlier mandatory-PR policy, not the other publication safeguards.
+
+## 020: Evidence-driven build workflows from pstack
+
+**Decision:** add project-local `bug-fix`, `feature`, `multi-phase-plan` and `principle-sequence-verifiable-units` skills adapted from pstack's poteto-mode playbooks and principles, and extend the existing testing skills with pstack's remaining hollow-test, sibling-fault and stand-in verification rules. The agent settles questions that running something can answer and asks the owner only product, preference or direction calls plus reserved approvals. Plans live in chat and the agent's todo list, not tracked files. Work proceeds test before code; a regression test and its fix land in one commit after verification. The root guide's routing table maps task triggers to every skill by full path, so the agent reads matching skills without the owner naming them.
+
+**Reason:** the owner sets direction and the agent implements. Fewer avoidable questions, root causes proven by runtime evidence and small verified units shorten the loop without lowering the proof standard of decision 013.
+
+**Tradeoff:** pstack's subagent delegation, model routing, multi-agent verification, PR and review automation and saved plan files are excluded; they conflict with opt-in delegation, direct-main work and the no-roadmap rule. A chat plan is lost on compaction except for its todo mirror. Failing-before evidence lives in the task report rather than a red commit on `main`. Skills remain instructions, not enforcement.
+
+**Publication impact:** only skill Markdown under the existing admitted `.agents/skills/` paths is added. No ignore rules, hooks, CI permissions or scanner settings change.
+
+**Verification:** the skill-loading test requires Pi to discover all ten skills without diagnostics and fails when any skill names a missing file; a synthetic skill with planted broken references proves the check detects them. A further test fails when the root guide does not route to a skill by an existing path, observed failing before the table existed. Whether the workflows make real tasks faster remains for owner review on future work.

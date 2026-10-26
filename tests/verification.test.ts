@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import { ROOT } from "../scripts/repo-check.ts";
 import {
@@ -148,7 +156,7 @@ test("verification retains a blocked report when source admission fails before c
   assert.deepEqual(report.results, []);
 });
 
-test("Pi discovers all six project skills with valid metadata and intended invocation", () => {
+test("Pi discovers all ten project skills with valid metadata and intended invocation", () => {
   const program = `
     import {loadSkillsFromDir} from '@earendil-works/pi-coding-agent';
     const loaded=loadSkillsFromDir({dir:${JSON.stringify(join(ROOT, ".agents/skills"))},source:'project'});
@@ -170,9 +178,13 @@ test("Pi discovers all six project skills with valid metadata and intended invoc
   };
   assert.deepEqual(loaded.diagnostics, []);
   assert.deepEqual(loaded.skills.map((s) => s.name).sort(), [
+    "bug-fix",
     "create-verification-skill",
+    "feature",
     "maintain-verification-skill",
+    "multi-phase-plan",
     "principle-prove-it-works",
+    "principle-sequence-verifiable-units",
     "principle-test-behavior-not-implementation",
     "tdd",
     "verify-rex",
@@ -183,5 +195,89 @@ test("Pi discovers all six project skills with valid metadata and intended invoc
       .map((s) => s.name)
       .sort(),
     ["create-verification-skill", "maintain-verification-skill"],
+  );
+});
+
+function missingSkillReferences(skills: string, root: string): string[] {
+  const missing: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.name.endsWith(".md")) check(path);
+    }
+  };
+  const check = (file: string): void => {
+    const text = readFileSync(file, "utf8");
+    const skill = join(skills, relative(skills, file).split("/")[0]!);
+    const targets: string[] = [];
+    for (const [, link] of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+      if (!/^(?:[a-z]+:|#)/.test(link!)) {
+        targets.push(join(dirname(file), link!.split("#")[0]!));
+      }
+    }
+    for (const [, path] of text.matchAll(/`([^`\s]+\.(?:md|txt))`/g)) {
+      if (path!.startsWith("../")) targets.push(join(dirname(file), path!));
+      else if (/^(?:references|features)\//.test(path!)) {
+        targets.push(join(skill, path!));
+      } else if (path!.includes("/")) targets.push(join(root, path!));
+    }
+    for (const target of targets) {
+      if (!existsSync(target)) {
+        missing.push(`${relative(skills, file)} -> ${relative(root, target)}`);
+      }
+    }
+  };
+  visit(skills);
+  return missing;
+}
+
+test("the root guide routes to every project skill by an existing path", () => {
+  const guide = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+  const routed = [...guide.matchAll(/`(\.agents\/skills\/[^`\s]+)`/g)].map(
+    ([, path]) => path!,
+  );
+  const skills = readdirSync(join(ROOT, ".agents/skills"), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `.agents/skills/${entry.name}/SKILL.md`);
+  assert.equal(skills.length, 10);
+  assert.deepEqual(
+    skills.filter((skill) => !routed.includes(skill)),
+    [],
+  );
+  assert.deepEqual(
+    routed.filter((path) => !existsSync(join(ROOT, path))),
+    [],
+  );
+});
+
+test("every file a project skill points to exists", (t) => {
+  assert.deepEqual(
+    missingSkillReferences(join(ROOT, ".agents/skills"), ROOT),
+    [],
+  );
+
+  const root = evidence(t);
+  const skill = join(root, ".agents/skills/synthetic");
+  mkdirSync(join(skill, "references"), { recursive: true });
+  writeFileSync(join(skill, "references/present.md"), "");
+  writeFileSync(
+    join(skill, "SKILL.md"),
+    [
+      "Read `references/present.md` and `references/absent.md`.",
+      "Then `../other/SKILL.md`, `docs/absent.md` and [x](absent.md#a).",
+      "See [pstack](https://example.com/pstack) and `index.md`.",
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    missingSkillReferences(join(root, ".agents/skills"), root).sort(),
+    [
+      "synthetic/SKILL.md -> .agents/skills/other/SKILL.md",
+      "synthetic/SKILL.md -> .agents/skills/synthetic/absent.md",
+      "synthetic/SKILL.md -> .agents/skills/synthetic/references/absent.md",
+      "synthetic/SKILL.md -> docs/absent.md",
+    ],
   );
 });

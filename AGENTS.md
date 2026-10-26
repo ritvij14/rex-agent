@@ -10,7 +10,7 @@ Do not maintain a repository roadmap; the owner tracks it separately. Do not cre
 
 ## Context and documentation
 
-Read this file fully at the start of every session. Its architecture and building-in-public rules apply to every task, not only architecture or publishing changes. Before reading or changing files in a subtree, discover and read each applicable ancestor `AGENTS.md` from the root down to the target directory; do not assume the harness loaded them automatically. Read only the relevant documents under `docs/features/` or `docs/infra/`; documentation follows this root guide and needs no separate scoped guide. Read [testing](docs/infra/testing.md) before changing behavior and [security](docs/infra/security.md) for private reporting or incidents. `CLAUDE.md` must contain only `@AGENTS.md` and a final newline.
+Read this file fully at the start of every session. Its architecture and building-in-public rules apply to every task, not only architecture or publishing changes. Before reading or changing files in a subtree, discover and read each applicable ancestor `AGENTS.md` from the root down to the target directory; do not assume the harness loaded them automatically. Read only the relevant documents under `docs/features/` or `docs/infra/`; documentation follows this root guide and needs no separate scoped guide. Read [testing](docs/infra/testing.md) before changing behavior and [security](docs/infra/security.md) for private reporting or incidents. Before starting any task, match it against the [project skills](#project-skills-and-verification) table and read each matching skill yourself; do not wait for the owner to name it. `CLAUDE.md` must contain only `@AGENTS.md` and a final newline.
 
 ## Scoped AGENTS.md: required placement
 
@@ -74,7 +74,7 @@ Use the direct-main workflow below rather than requiring PRs or server-side pre-
 
 Use Node.js 22 LTS, npm with the committed lockfile, and system `tar` on macOS/Linux. Prefer TypeScript for logic, scripts, and tests; another language needs a concrete benefit. Pinned `tsx` runs `.ts` files, Node's built-in runner runs tests, and strict `tsc --noEmit` checks types without generating source-tree JavaScript. Future distributable packages may need their own builds. Pi CLI 1.3.0 is pinned in the terminal experiment's own manifest and lockfile, not installed as a root dependency. Keep runtime versions and their checks explicit when adding other experiments.
 
-1. Inspect the actual code and callers; state assumptions and ask when a decision is needed.
+1. Inspect the actual code and callers and state assumptions. Answer questions that running something can settle (behavior, output, timing, compatibility) with the smallest check instead of asking. Ask the owner only product, preference or direction calls and the approvals this guide reserves.
 2. Reproduce bugs first. Define success, invalid inputs, denied actions, and relevant failure/retry cases before new behavior.
 3. Make the smallest complete change. No unrelated cleanup, speculative abstractions, mandatory subagents, or background processes started by extension loading.
 4. Run the checks and report exact results, skipped checks, and remaining risks. Do not weaken acceptance criteria for a green result.
@@ -82,11 +82,26 @@ Use Node.js 22 LTS, npm with the committed lockfile, and system `tar` on macOS/L
 
 Use kebab-case paths without whitespace. TypeScript/JSON/YAML use two spaces. Comments explain non-obvious constraints only. Keep regression tests with synthetic fixtures. Markdown uses one source line per paragraph with no fixed line-length limit; the roughly 80-character target applies to code, not prose.
 
-## Project verification workflow
+## Project skills and verification
 
-Use the project-local skills under `.agents/skills/` when developing Rex. Before writing or changing tests, read `principle-test-behavior-not-implementation/SKILL.md`; for practical bug reproductions, also read `tdd/SKILL.md`. Before reporting implementation complete, follow `verify-rex/SKILL.md` and `principle-prove-it-works/SKILL.md`. Derive observable checks from the user's intended result, select relevant failure risks and exercise the actual installed interface for runtime changes. These instructions do not grant new permissions or override the task's allowed scope.
+The project skills under `.agents/skills/` define how Rex is built. Read a skill when its trigger applies, whether or not the owner names it, and again when the task moves into a new row. Several rows usually apply at once: a bug fix reads the bug-fix workflow, the test principle, the unit principle and both completion skills. Only the owner can waive a matching skill, except that a trivial edit with an obvious approach needs no workflow skill; it still ends with verification. Skills grant no permissions and do not override the task's allowed scope or the approvals in this guide.
 
-Extend the verification feature map and reusable checks when behavior changes; use `create-verification-skill` for a genuinely missing recipe and `maintain-verification-skill` for drift or escaped bugs. Start with the main agent, not automatic reviewers or swarms. `npm run verify -- full` retains source-fingerprinted evidence for the existing account-free checks and disposable container acceptance. Report task-specific QA and sensitivity observations separately; a green baseline is not proof of every feature. Keep raw development evidence in ignored `.local/verification/`, never application histories or public artifacts. See [testing](docs/infra/testing.md) for commands and limits. These project skills are not enabled inside sandbox profiles.
+| When | Read |
+| --- | --- |
+| A reported defect, failing check, regression or unexpected behavior | `.agents/skills/bug-fix/SKILL.md` |
+| A bug with an obvious inexpensive local reproduction, or a request for TDD or a regression test | `.agents/skills/tdd/SKILL.md` |
+| New or changed behavior beyond a trivial edit | `.agents/skills/feature/SKILL.md` |
+| Work spanning several sessions, phases or many commits, or a request for a plan | `.agents/skills/multi-phase-plan/SKILL.md` |
+| Any multi-step change, and before every commit | `.agents/skills/principle-sequence-verifiable-units/SKILL.md` |
+| Writing, changing, reviewing or retaining a test | `.agents/skills/principle-test-behavior-not-implementation/SKILL.md` |
+| Before reporting implementation complete, or a verification or QA request | `.agents/skills/verify-rex/SKILL.md`, then `.agents/skills/principle-prove-it-works/SKILL.md` |
+| A real interface has no repeatable user-level QA recipe | `.agents/skills/create-verification-skill/SKILL.md` |
+| Verification instructions drifted, a bug escaped the checks, or a verification audit is requested | `.agents/skills/maintain-verification-skill/SKILL.md` |
+| Creating or editing a skill | `.agents/AGENTS.md`, and add the skill to this table |
+
+Plans live in chat and the todo list, never in tracked files. Work tests before code, one verified unit at a time; a test and its fix are committed together only after verification. Derive observable checks from the user's intended result, select relevant failure risks and exercise the actual installed interface for runtime changes.
+
+Extend the verification feature map and reusable checks when behavior changes. Start with the main agent, not automatic reviewers or swarms. `npm run verify -- full` retains source-fingerprinted evidence for the existing account-free checks and disposable container acceptance. Report task-specific QA and sensitivity observations separately; a green baseline is not proof of every feature. Keep raw development evidence in ignored `.local/verification/`, never application histories or public artifacts. See [testing](docs/infra/testing.md) for commands and limits. These project skills are not enabled inside sandbox profiles.
 
 ### Live-provider QA
 
