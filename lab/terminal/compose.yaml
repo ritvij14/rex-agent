@@ -54,8 +54,6 @@ services:
     volumes:
       - workspace:/workspace
       - agent-state:/state
-      - profile-definitions:/profiles:ro
-      - profile-proposals:/proposals
       - inference-socket:/run/rex:ro
     healthcheck:
       test:
@@ -69,27 +67,8 @@ services:
       timeout: 2s
       retries: 15
 
-  profile-admin:
-    <<: *runtime
-    profiles: [operator]
-    user: "0:0"
-    network_mode: none
-    entrypoint:
-      - node
-      - --import
-      - /opt/rex/node_modules/tsx/dist/loader.mjs
-      - /opt/rex/packages/pi-profiles/src/operator.ts
-    cpus: 0.5
-    mem_limit: 256m
-    memswap_limit: 256m
-    pids_limit: 64
-    volumes:
-      - profile-definitions:/profiles
-      - profile-proposals:/proposals:ro
-
 volumes:
   workspace:
   agent-state:
   profile-definitions:
-  profile-proposals:
   inference-socket:

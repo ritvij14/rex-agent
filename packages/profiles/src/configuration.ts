@@ -243,17 +243,17 @@ export function resolveEffectiveProfile(
   },
   shared?: SharedConfiguration,
 ) {
-  if (profile.configuration) {
-    return Object.freeze({ ...profile, configuration: profile.configuration });
-  }
-  if (profile.soul) {
-    const model = profile.model ?? shared?.model;
+  const persona = profile.configuration?.instructions ?? profile.soul;
+  const tools = profile.configuration?.tools ?? profile.tools;
+  if (persona) {
+    const model =
+      profile.configuration?.model ?? profile.model ?? shared?.model;
     if (!model) throw new ProfileError("PROFILE_INCOMPLETE");
     const instructions = shared?.soul
-      ? `${shared.soul}\n\n${profile.soul}`
-      : profile.soul;
+      ? `${shared.soul}\n\n${persona}`
+      : persona;
     const blacklist = [
-      ...(profile.tools?.blacklist ?? []),
+      ...(tools?.blacklist ?? []),
       ...(shared?.tools?.blacklist ?? []),
       ...(shared?.mandatory?.tools?.blacklist ?? []),
     ];
@@ -266,7 +266,7 @@ export function resolveEffectiveProfile(
         model,
         tools: Object.freeze({
           whitelist: Object.freeze([
-            ...(profile.tools?.whitelist ?? shared?.tools?.whitelist ?? []),
+            ...(tools?.whitelist ?? shared?.tools?.whitelist ?? []),
           ]),
           blacklist: Object.freeze([...new Set(blacklist)]),
         }),

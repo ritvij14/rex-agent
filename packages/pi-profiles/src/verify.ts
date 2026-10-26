@@ -1,23 +1,40 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import {
   access,
   mkdir,
   mkdtemp,
   readdir,
+  readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { once } from "node:events";
-import { createServer } from "node:http";
-import { join } from "node:path";
+import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { lookupProfile } from "@rex/profiles";
-import {
-  IncompleteProfileResponseError,
-  runProfileRequest,
-  createProposal,
-} from "./index.ts";
+import { IncompleteProfileResponseError, runProfileRequest } from "./index.ts";
+
+const SYNTHETIC_MODEL = { provider: "cli-proxy", id: "glm-5.3-flash-cloud" };
+
+function syntheticDefinition(id: string) {
+  return {
+    id,
+    configuration: {
+      instructions: `A synthetic ${id} profile used only for response checks.`,
+      model: SYNTHETIC_MODEL,
+      tools: {
+        whitelist: id === "coding" ? ["*"] : ["read", "ls"],
+        blacklist:
+          id === "coding"
+            ? ["propose_profile"]
+            : ["bash", "write", "edit", "propose_profile"],
+      },
+    },
+  };
+}
 
 async function verifyResponses() {
   const root = await mkdtemp(join(tmpdir(), "rex-response-check-"));
@@ -69,10 +86,19 @@ async function verifyResponses() {
     await once(server, "listening");
     const address = server.address();
     assert.ok(address && typeof address !== "string");
+    const profilesRoot = join(root, "profiles");
+    await mkdir(profilesRoot, { recursive: true });
     for (const name of ["state", "proposals", "workspace"])
       await mkdir(join(root, name));
+    for (const id of ["coding", "research", "profile-builder"]) {
+      await mkdir(join(profilesRoot, id));
+      await writeFile(
+        join(profilesRoot, id, "profile.json"),
+        JSON.stringify(syntheticDefinition(id)),
+      );
+    }
     const options = {
-      profilesRoot: "/profiles",
+      profilesRoot,
       stateRoot: join(root, "state"),
       proposalsRoot: join(root, "proposals"),
       cwd: join(root, "workspace"),
@@ -124,114 +150,102 @@ async function verifyResponses() {
   }
 }
 
+function assertHardenedProc() {
+  const status = readFileSync("/proc/self/status", "utf8");
+  assert.match(status, /CapEff:\s+0000000000000000/);
+  assert.match(status, /NoNewPrivs:\s+1/);
+}
+
+async function workerMode(id: string, action: "prepare" | "verify" | "check") {
+  const markerWorkspace = "/workspace/synthetic-check.txt";
+  const markerState = "/state/synthetic-check.txt";
+  if (action === "prepare") {
+    await writeFile(markerWorkspace, id, { mode: 0o600 });
+    await writeFile(markerState, id, { mode: 0o600 });
+    await mkdir("/state/memory", { recursive: true });
+    await writeFile("/state/memory/synthetic-marker.txt", id);
+    await mkdir("/proposals/synthetic-helper", { recursive: true });
+    await writeFile(
+      "/proposals/synthetic-helper/profile.json",
+      JSON.stringify(syntheticDefinition("synthetic-helper")),
+    );
+    await writeFile(
+      "/proposals/synthetic-helper/provenance.json",
+      JSON.stringify({
+        operation: "create",
+        origin: "profile-builder",
+        baseDigest: null,
+        sharedDigest: null,
+      }),
+    );
+  }
+  if (action === "check") {
+    assert.equal(await readFile(markerWorkspace, "utf8"), id);
+    assert.equal(await readFile(markerState, "utf8"), id);
+    assert.equal(
+      await readFile("/workspace/model-marker.txt", "utf8"),
+      "synthetic-coding",
+    );
+    assert.ok((await readdir(`/state/profiles/${id}/sessions`)).length > 0);
+  }
+  assert.deepEqual((await readdir("/profiles")).sort(), [id, "shared"].sort());
+  if (action === "verify") {
+    assert.deepEqual(await readdir("/workspace"), []);
+    assert.ok(
+      !(await readdir("/state")).includes("synthetic-check.txt"),
+      "another profile's state marker must be invisible",
+    );
+    await assert.rejects(
+      lookupProfile("/profiles", id === "research" ? "coding" : "research"),
+    );
+    await assert.rejects(access("/state/memory/synthetic-marker.txt"));
+    await assert.rejects(access("/proposals/synthetic-helper/provenance.json"));
+  }
+  await assert.rejects(writeFile("/profiles/forbidden", "synthetic"));
+  await assert.rejects(access("/var/run/docker.sock"));
+  await assert.rejects(access("/run/docker.sock"));
+  await writeFile("/tmp/synthetic-tmp", "ok");
+  await assert.rejects(writeFile("/forbidden-root", "synthetic"));
+  await symlink("/", "/workspace/root-escape", "dir");
+  assert.deepEqual(
+    (await readdir("/workspace/root-escape/profiles")).sort(),
+    [id, "shared"].sort(),
+  );
+  await rm("/workspace/root-escape", { force: true });
+  assertHardenedProc();
+  await new Promise<void>((resolve, reject) => {
+    const req = request(
+      { socketPath: "/run/rex/inference.sock", path: "/v1/models" },
+      (res) => {
+        assert.equal(res.statusCode, 200);
+        res.resume();
+        res.once("end", resolve);
+      },
+    );
+    req.once("error", reject);
+    req.end();
+  });
+  await assert.rejects(
+    fetch("http://10.255.255.1/", { signal: AbortSignal.timeout(5000) }),
+  );
+}
+
 async function main() {
-  if (process.argv[2] === "responses") {
+  const [mode, profile, action] = process.argv.slice(2);
+  if (mode === "responses") {
     await verifyResponses();
     return;
   }
-  if (process.argv[2] === "approved") {
-    assert.equal(
-      (await lookupProfile("/profiles", "synthetic-helper")).configuration
-        ?.model.id,
-      "glm-5.3-flash-cloud",
+  if (mode === "worker") {
+    assert.ok(
+      (profile === "coding" || profile === "research") &&
+        (action === "prepare" || action === "verify" || action === "check"),
     );
-    console.log("PASS: operator-approved synthetic profile is available.");
+    await workerMode(profile, action);
+    console.log(`PASS: worker isolation probes for ${profile} (${action}).`);
     return;
   }
-  const options = {
-    profilesRoot: "/profiles",
-    stateRoot: "/state/profiles",
-    proposalsRoot: "/proposals",
-    cwd: "/workspace",
-    baseUrl: "http://127.0.0.1:8317/v1",
-  };
-  assert.deepEqual((await readdir("/profiles")).sort(), [
-    "coding",
-    "profile-builder",
-    "research",
-  ]);
-  await assert.rejects(writeFile("/profiles/forbidden", "synthetic"));
-  await assert.rejects(
-    runProfileRequest({ ...options, input: "Missing profile selector" }),
-  );
-  for (const id of ["coding", "research", "profile-builder"]) {
-    const result = await runProfileRequest({
-      ...options,
-      input: `profile: ${id}\nReply with synthetic.`,
-      signal: AbortSignal.timeout(20000),
-    });
-    assert.equal(result.profileId, id);
-    assert.equal(result.model, "glm-5.3-flash-cloud");
-    assert.equal(result.output, "synthetic");
-  }
-  for (const path of [
-    "/opt/rex/packages/profiles/AGENTS.md",
-    "/opt/rex/packages/profiles/tests",
-    "/opt/rex/packages/pi-profiles/AGENTS.md",
-    "/opt/rex/packages/pi-profiles/tests",
-  ]) {
-    await assert.rejects(access(path));
-  }
-  const cli = spawnSync(
-    "/usr/local/bin/rex",
-    ["--new-session", "profile: research\nsynthetic-cap-free-response"],
-    { encoding: "utf8", timeout: 30000 },
-  );
-  assert.equal(cli.status, 0);
-  assert.match(cli.stdout, /profile=research model=glm-5.3-flash-cloud/);
-  assert.match(cli.stdout, /synthetic/);
-  const truncated = spawnSync(
-    "/usr/local/bin/rex",
-    ["--new-session", "profile: research\nsynthetic-truncated-response"],
-    { encoding: "utf8", timeout: 30000 },
-  );
-  assert.equal(truncated.status, 1);
-  assert.equal(truncated.stdout, "");
-  assert.match(truncated.stderr, /truncated.*output limit/i);
-  assert.ok(!truncated.stderr.includes("synthetic-private-partial"));
-  const recovered = spawnSync(
-    "/usr/local/bin/rex",
-    ["profile: research\nsynthetic-cap-free-response"],
-    { encoding: "utf8", timeout: 30000 },
-  );
-  assert.equal(recovered.status, 0);
-  assert.match(recovered.stdout, /synthetic/);
-  assert.equal(
-    spawnSync("/usr/local/bin/rex", ["No profile selector"], { stdio: "pipe" })
-      .status,
-    1,
-  );
-  const denied = spawnSync(
-    process.execPath,
-    [
-      "--import",
-      "/opt/rex/node_modules/tsx/dist/loader.mjs",
-      "/opt/rex/packages/pi-profiles/src/operator.ts",
-      "approve",
-      "synthetic-helper",
-      "0".repeat(64),
-    ],
-    { stdio: "pipe" },
-  );
-  assert.equal(denied.status, 1);
-  const proposal = await createProposal(
-    "/profiles",
-    "/proposals",
-    {
-      id: "synthetic-helper",
-      configuration: {
-        instructions: "A synthetic test helper.",
-        model: { provider: "cli-proxy", id: "glm-5.3-flash-cloud" },
-        tools: { whitelist: ["read"], blacklist: ["bash"] },
-      },
-    },
-    { operation: "create", origin: "profile-builder" },
-  );
-  await assert.rejects(lookupProfile("/profiles", proposal.id));
-  await writeFile("/state/synthetic-proposal-digest.txt", proposal.digest);
-  console.log(
-    "PASS: installed profile SDK, three synthetic role/model runs, selector rejection, read-only definitions and operator-only activation.",
-  );
+  throw new Error("Unknown verify mode");
 }
 
 main().catch(() => {

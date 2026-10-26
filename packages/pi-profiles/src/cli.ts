@@ -1,3 +1,5 @@
+import { readdir } from "node:fs/promises";
+import { parseProfileRequest } from "@rex/profiles";
 import { IncompleteProfileResponseError, runProfileRequest } from "./index.ts";
 
 async function main() {
@@ -16,6 +18,12 @@ async function main() {
     }
     input = Buffer.concat(chunks).toString("utf8");
   }
+  const { profileId } = parseProfileRequest(input);
+  const definitions = (await readdir("/profiles")).filter(
+    (id) => id !== "shared",
+  );
+  if (definitions.length !== 1 || definitions[0] !== profileId)
+    throw new Error();
   const result = await runProfileRequest({
     profilesRoot: "/profiles",
     stateRoot: "/state/profiles",

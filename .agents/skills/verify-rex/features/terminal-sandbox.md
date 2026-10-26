@@ -8,12 +8,12 @@ Node 22, locked local dependencies, scanner setup and a running Docker engine ar
 
 ## Repeatable checks
 
-- Run `node --import tsx --test tests/sandbox.test.ts` for gateway routing/input rejection, credential stripping, configuration and launcher contracts.
+- Run `node --import tsx --test tests/sandbox.test.ts tests/profile-provisioning.test.ts` for gateway routing/input rejection, credential stripping, selected-only snapshots and launcher contracts.
 - Run `npm run verify -- sandbox` for newly built containers in a unique `rex-terminal-check-*` project. The existing suite launches a fake inference service and uses no live proxy or model.
 
 ## Expected observations
 
-Installed Pi and Rex run as intended; the container resolves Pi's external undici dependency to 8.12.2 while retaining Pi 1.3.0. This version check does not inspect or fix the separate implementation embedded in the Pi CLI bundle. Writable synthetic files are visible on a second read. Root/package/definition paths reject writes. Containers have no host bind mounts, published ports, capabilities or privilege escalation. Direct networking and management access remain denied. Stopping the test gateway produces the expected failure; restarting it recovers. Persistent files survive sandbox recreation, while temporary files do not. Resetting only the newly created test volumes removes synthetic persistent state.
+Installed Pi and Rex run as intended; the container resolves Pi's external undici dependency to 8.12.2 while retaining Pi 1.3.0. This version check does not inspect or fix the separate implementation embedded in the Pi CLI bundle. Writable synthetic files are visible on a second read. Root/package/definition paths reject writes. Agent containers have no host bind mounts, published ports, capabilities or privilege escalation. The short-lived trusted provisioning helper has only `CHOWN` to initialize writable mount roots; approval helpers have no capabilities, inference access or workspace/state mounts. Workers use private volume/process namespaces and a selected-only read-only definitions snapshot, never the master. The production profile CLI rejects the unprofiled shared baseline. Direct networking and management access remain denied. Stopping the test gateway produces the expected failure; restarting it recovers. Persistent files survive sandbox recreation, while temporary files do not. Resetting only the newly created test volumes removes synthetic persistent state.
 
 The command's final cleanup removes its own containers and volumes. The outer verification runner retains logs and the source-fingerprinted report outside those containers. Confirm both cleanup and retained evidence; a successful final message alone is not proof of the changed boundary.
 

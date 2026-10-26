@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { withProfileLock } from "../scripts/profile-worker.ts";
 import { ROOT } from "../scripts/repo-check.ts";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect } from "node:net";
-import { main as sandboxMain } from "../scripts/sandbox.ts";
+import {
+  main as sandboxMain,
+  parseRexInput,
+  workerDockerArgs,
+} from "../scripts/sandbox.ts";
 import { captureLogs } from "./helpers.ts";
 import { test, type TestContext } from "node:test";
 import {
@@ -310,8 +316,8 @@ test("sandbox build context permits only named public runtime files", () => {
     "!configure.ts",
     "!runtime.ts",
     "!verify.ts",
+    "!provision.ts",
     "!pi.sh",
-    "!rex.sh",
     "!profiles/",
     "!profiles/coding/",
     "!profiles/coding/profile.json",
@@ -341,6 +347,94 @@ test("sandbox build context permits only named public runtime files", () => {
       ["*", "!package.json", "!src/", ...files.map((file) => `!src/${file}`)],
     );
   }
+});
+
+test("rex input parsing stays explicit, bounded and option-safe", () => {
+  assert.deepEqual(parseRexInput([]), { newSession: false, input: null });
+  assert.deepEqual(parseRexInput(["--new-session"]), {
+    newSession: true,
+    input: null,
+  });
+  assert.deepEqual(parseRexInput(["profile: coding\nHi"]), {
+    newSession: false,
+    input: "profile: coding\nHi",
+  });
+  assert.deepEqual(parseRexInput(["--new-session", "profile: coding\nHi"]), {
+    newSession: true,
+    input: "profile: coding\nHi",
+  });
+  assert.throws(() => parseRexInput(["a", "b"]));
+  assert.throws(() => parseRexInput(["--new-session", "--more"]));
+});
+
+test("worker launchers are isolated by construction", () => {
+  const args = workerDockerArgs({
+    project: "rex-check",
+    image: "rex-image",
+    profile: "coding",
+    volumes: {
+      workspace: "rex-check_workspace",
+      state: "rex-check_state",
+      proposals: "rex-check_proposals",
+      defs: "rex-check_defs",
+      socket: "rex-check_inference-socket",
+    },
+    name: "rex-check-worker-1",
+  });
+  assert.equal(args[0], "run");
+  for (const flag of [
+    "--rm",
+    "--network",
+    "none",
+    "--read-only",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--cap-drop",
+    "ALL",
+    "--init",
+    "--user",
+    "1000:1000",
+    "--pids-limit",
+    "128",
+    "--memory",
+    "1g",
+    "--cpus",
+    "2",
+  ]) {
+    assert.ok(args.includes(flag), flag);
+  }
+  const mounts: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "-v") mounts.push(args[index + 1]!);
+  }
+  assert.equal(mounts.length, 5, mounts.join(","));
+  for (const mount of mounts) {
+    assert.equal(mount.startsWith("/") || mount.startsWith("~"), false, mount);
+  }
+  assert.ok(mounts.includes("rex-check_defs:/profiles:ro,nocopy"), "defs ro");
+  assert.ok(
+    mounts.includes("rex-check_inference-socket:/run/rex:ro"),
+    "socket ro",
+  );
+  assert.ok(mounts.includes("rex-check_workspace:/workspace"));
+  assert.ok(mounts.includes("rex-check_state:/state"));
+  assert.ok(mounts.includes("rex-check_proposals:/proposals"));
+  assert.equal(
+    mounts.some(
+      (mount) =>
+        mount.includes("docker.sock") || mount === "/var/run/docker.sock",
+    ),
+    false,
+  );
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "--tmpfs") {
+      assert.match(args[index + 1]!, /noexec.*nosuid/);
+    }
+  }
+  assert.ok(args.includes("rex-image"));
+  assert.ok(args.includes("rex-check-worker-1"));
+  const imageIndex = args.indexOf("rex-image");
+  assert.equal(args[imageIndex + 1], "node");
 });
 
 test("sandbox CLI rejects unknown actions and unconfirmed reset without invoking Docker", () => {
@@ -379,4 +473,24 @@ test("model configuration permits only supported protocols and literal model IDs
     ].baseUrl,
     "http://127.0.0.1:8317",
   );
+});
+
+test("a held operator lock rejects work without deleting the existing lock", () => {
+  const project = `rex-lock-${randomUUID()}`;
+  const path = join(tmpdir(), `${project}-rex-coding.lock`);
+  writeFileSync(path, "synthetic lock owner", { flag: "wx", mode: 0o600 });
+  let called = false;
+  try {
+    assert.throws(
+      () =>
+        withProfileLock(project, "coding", () => {
+          called = true;
+        }),
+      /busy/,
+    );
+    assert.equal(called, false);
+    assert.equal(readFileSync(path, "utf8"), "synthetic lock owner");
+  } finally {
+    rmSync(path);
+  }
 });

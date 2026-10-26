@@ -4,11 +4,23 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { modelConfiguration } from "../lab/terminal/configure.ts";
 import { isMain, ROOT } from "./repo-check.ts";
-import { validateProfileId } from "@rex/profiles";
+import { parseProfileRequest, validateProfileId } from "@rex/profiles";
+import {
+  NODE,
+  parseRexInput,
+  readRexInput,
+  runProfileWorker,
+  operatorProfileCommand,
+  requireSuccess,
+} from "./profile-worker.ts";
+import {
+  checkProfileAcceptance,
+  cleanupProfileAcceptance,
+} from "./profile-acceptance.ts";
+export { parseRexInput, workerDockerArgs } from "./profile-worker.ts";
 
 const PROJECT = "rex-terminal";
 const LAB = join(ROOT, "lab/terminal");
-const NODE = ["node", "--import", "/opt/rex/node_modules/tsx/dist/loader.mjs"];
 
 function compose(
   project: string,
@@ -91,6 +103,13 @@ function check() {
       assert.equal(host.PidsLimit, service === "sandbox" ? 128 : 64);
       if (service === "sandbox") {
         assert.equal(host.NetworkMode, "none");
+        assert.ok(
+          !mounts.some(
+            (mount) =>
+              mount.Destination === "/profiles" ||
+              mount.Destination === "/proposals",
+          ),
+        );
         assert.equal(
           mounts.find((mount) => mount.Destination === "/run/rex")?.RW,
           false,
@@ -138,42 +157,15 @@ function check() {
       true,
     );
     assert.match(output, /synthetic/);
-    exec(...NODE, "/opt/rex/packages/pi-profiles/src/verify.ts");
-    exec(...NODE, "/opt/rex/packages/pi-profiles/src/verify.ts", "responses");
-    const digest = compose(
-      project,
-      true,
-      [
-        "exec",
-        "-T",
-        "sandbox",
-        "node",
-        "-e",
-        "process.stdout.write(require('node:fs').readFileSync('/state/synthetic-proposal-digest.txt','utf8'))",
-      ],
-      true,
-    );
-    assert.match(digest, /^[a-f0-9]{64}$/);
-    run(
-      "run",
-      "--rm",
-      "--no-deps",
-      "--entrypoint",
+    exec(
       "node",
-      "profile-admin",
       "-e",
-      "const a=require('node:assert/strict'),f=require('node:fs');a.equal(process.getuid(),0);a.deepEqual(Object.keys(require('node:os').networkInterfaces()),['lo']);a.match(f.readFileSync('/proc/self/status','utf8'),/CapEff:\\s+0000000000000000/);a.match(f.readFileSync('/proc/self/status','utf8'),/NoNewPrivs:\\s+1/);for(const p of ['/run/rex/inference.sock','/var/run/docker.sock'])a.equal(f.existsSync(p),false);for(const p of ['/state','/workspace']){a.deepEqual(f.readdirSync(p),[]);a.throws(()=>f.writeFileSync(p+'/forbidden','synthetic'));}a.equal(Object.hasOwn(process.env,'REX_PROXY_API_KEY'),false);a.throws(()=>f.writeFileSync('/proposals/forbidden','synthetic'));a.throws(()=>f.writeFileSync('/forbidden','synthetic'));",
+      `const a=require('node:assert/strict'),{spawnSync}=require('node:child_process');
+      const r=spawnSync(process.execPath,['--import','/opt/rex/node_modules/tsx/dist/loader.mjs','/opt/rex/packages/pi-profiles/src/cli.ts','profile: research\\nsynthetic-cap-free-response'],{encoding:'utf8'});
+      a.equal(r.status,1,'shared baseline must reject the profile CLI');a.equal(r.stdout,'');`,
     );
-    run(
-      "run",
-      "--rm",
-      "--no-deps",
-      "profile-admin",
-      "approve",
-      "synthetic-helper",
-      digest,
-    );
-    exec(...NODE, "/opt/rex/packages/pi-profiles/src/verify.ts", "approved");
+    exec(...NODE, "/opt/rex/packages/pi-profiles/src/verify.ts", "responses");
+    checkProfileAcceptance(project);
     run("stop", "gateway");
     exec(
       "node",
@@ -187,7 +179,7 @@ function check() {
       "fetch('http://127.0.0.1:8317/v1/models').then(r=>{if(!r.ok)process.exit(1)})",
     );
     run("up", "-d", "--wait", "--force-recreate", "sandbox");
-    exec(...NODE, "/opt/rex/packages/pi-profiles/src/verify.ts", "approved");
+
     exec(
       "node",
       "-e",
@@ -204,6 +196,7 @@ function check() {
       "PASS: real containers, synthetic Pi/profile inference, operator approval, gateway recovery, persistent recreation, and clean reset. No live proxy or model used.",
     );
   } finally {
+    cleanupProfileAcceptance(project);
     run("down", "--volumes");
   }
 }
@@ -253,29 +246,39 @@ export function main(args: string[]): number {
         "/usr/local/bin/pi",
         ...rest,
       ]);
-    else if (command === "rex")
-      compose(PROJECT, false, [
-        "exec",
-        "-T",
-        "sandbox",
-        "/usr/local/bin/rex",
-        ...rest,
-      ]);
-    else if (
+    else if (command === "rex") {
+      const { newSession, input } = parseRexInput(rest);
+      const request = input ?? readRexInput();
+      const { profileId } = parseProfileRequest(request);
+      const result = runProfileWorker({
+        project: PROJECT,
+        profile: profileId,
+        input: request,
+        newSession,
+      });
+      if (result.status !== 0) {
+        console.error(
+          result.stderr.includes("Profile response was truncated")
+            ? "Profile response was truncated at the provider output limit. Earlier tool actions may already have completed."
+            : "Profile request failed; private diagnostics omitted.",
+        );
+        return 1;
+      }
+      process.stdout.write(result.stdout);
+    } else if (
       (command === "review-profile" && rest.length === 1) ||
       (command === "approve-profile" && rest.length === 2)
     ) {
       validateProfileId(rest[0]);
       if (command === "approve-profile" && !/^[a-f0-9]{64}$/.test(rest[1]!))
         throw new Error();
-      compose(PROJECT, false, [
-        "run",
-        "--rm",
-        "--no-deps",
-        "profile-admin",
+      const result = operatorProfileCommand(
+        PROJECT,
         command === "review-profile" ? "review" : "approve",
-        ...rest,
-      ]);
+        rest[0]!,
+        rest[1],
+      );
+      process.stdout.write(requireSuccess(result) + "\n");
     } else if (command === "configure" && rest.length === 2) {
       modelConfiguration(rest[0]!, rest[1]!);
       compose(PROJECT, false, [
@@ -296,6 +299,8 @@ export function main(args: string[]): number {
     return 0;
   } catch (error) {
     if (command === "check") console.error(error);
+    if (error instanceof Error && /busy/.test(error.message))
+      console.error("Profile is busy; operator recovery may be required.");
     console.error(
       "BLOCKED: sandbox command failed; no private configuration printed.",
     );

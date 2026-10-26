@@ -6,8 +6,8 @@
 !configure.ts
 !runtime.ts
 !verify.ts
+!provision.ts
 !pi.sh
-!rex.sh
 !profiles/
 !profiles/coding/
 !profiles/coding/profile.json

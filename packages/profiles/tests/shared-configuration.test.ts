@@ -317,3 +317,30 @@ test("runtime turns still bind the profile without shared configuration", async 
   });
   assert.equal(seen, "minimal");
 });
+
+test("shared persona and mandatory tool denials also cover legacy profiles", () => {
+  const definition = parseProfileDefinition({
+    id: "coding",
+    configuration: {
+      instructions: "Coding persona.",
+      model: { provider: "cli-proxy", id: "synthetic-model" },
+      tools: { whitelist: ["*"], blacklist: [] },
+    },
+  });
+  const effective = resolveEffectiveProfile(
+    { ...definition, home: "/synthetic/coding" },
+    {
+      ...parseSharedConfiguration({
+        version: 2,
+        mandatory: { tools: { blacklist: ["bash"] } },
+      }),
+      soul: "Common instruction.",
+    },
+  );
+  assert.equal(
+    effective.configuration.instructions,
+    "Common instruction.\n\nCoding persona.",
+  );
+  assert.equal(isToolAllowed(effective.configuration.tools, "bash"), false);
+  assert.equal(isToolAllowed(effective.configuration.tools, "read"), true);
+});

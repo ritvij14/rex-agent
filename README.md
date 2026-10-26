@@ -34,7 +34,7 @@ A working-tree pass does **not** mean old Git history is safe to publish. The re
 
 ## Profile core
 
-`@rex/profiles` resolves and carries an explicit profile through one asynchronous turn without changing the process environment. `@rex/pi-profiles` runs that turn through Pi with its own instructions, model, tools and history. Three minimal profiles—`coding`, `research`, and `profile-builder`—use GLM 5.3 Flash Cloud. Tool rules allow exact names or `*`, with blacklist precedence. This is not filesystem isolation between profiles. See [the profile contract and limits](docs/features/profiles.md).
+`@rex/profiles` resolves and carries an explicit profile through one asynchronous turn without changing the process environment. `@rex/pi-profiles` runs that turn through Pi with its own instructions, model, tools and history. Three minimal profiles—`coding`, `research`, and `profile-builder`—use GLM 5.3 Flash Cloud. Tool rules allow exact names or `*`, with blacklist precedence. The operator launches each profile in a separate networkless container with its own workspace, state, drafts and read-only configuration snapshot; other profiles' storage is not mounted. The plain SDK does not enforce this boundary by itself. Synthetic container acceptance covers the new workers; earlier live checks used the former shared layout. See [the profile contract and limits](docs/features/profiles.md).
 
 With the authenticated sandbox running, execute a prompt containing its selector:
 
@@ -42,7 +42,7 @@ With the authenticated sandbox running, execute a prompt containing its selector
 npm run sandbox -- rex $'profile: research\nList the local workspace files.'
 ```
 
-Use `npm run sandbox -- refresh` to install rebuilt packages without restarting the authenticated gateway or deleting state. Drafts require a separate `review-profile` / digest-bound `approve-profile` operator action; they never activate automatically. Live runs use the existing model allowance. Account-free tests run through `npm run check` and `npm run sandbox -- check`.
+New workers use the built image and private per-profile volumes. Existing shared histories/workspace are not automatically migrated; do not infer that refreshing moves or isolates old state. `npm run sandbox -- refresh` recreates only the unprofiled baseline while preserving the authenticated gateway and existing volumes. Drafts require a separate `review-profile` / digest-bound `approve-profile` operator action; they never activate automatically. Live runs use the existing model allowance. Account-free tests run through `npm run check` and `npm run sandbox -- check`.
 
 ## Terminal sandbox
 
