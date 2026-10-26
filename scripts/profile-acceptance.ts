@@ -71,12 +71,18 @@ export function checkProfileAcceptance(project: string) {
      f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.');`,
   ]);
   requireSuccess(seed);
-  const run = (id: string, task: string, newSession = false) =>
+  const run = (
+    id: string,
+    task: string,
+    newSession = false,
+    maintain = false,
+  ) =>
     runProfileWorker({
       project,
       profile: id,
       input: `profile: ${id}\n${task}`,
       newSession,
+      maintain,
     });
   const probe = (id: string, action: string) =>
     requireSuccess(
@@ -280,6 +286,56 @@ export function checkProfileAcceptance(project: string) {
   );
   requireSuccess(run("synthetic-helper", "synthetic-cap-free-response"));
   probe("coding", "check");
+  requireSuccess(run("coding", "synthetic-self-update", false, true));
+  const revision = JSON.parse(
+    requireSuccess(operatorProfileCommand(project, "review-update", "coding")),
+  );
+  assert.equal(revision.provenance.operation, "update");
+  assert.equal(revision.provenance.origin, "coding");
+  assert.equal(
+    operatorProfileCommand(project, "approve-update", "coding", "0".repeat(64))
+      .status,
+    1,
+  );
+  const codingName = `${project}-rex-coding`;
+  requireSuccess(
+    docker(
+      workerDockerArgs({
+        project,
+        image: IMAGE,
+        profile: "coding",
+        volumes: workerVolumes(project, "coding"),
+        name: codingName,
+        detached: true,
+        command: ["sleep", "120"],
+      }),
+    ),
+  );
+  assert.throws(
+    () =>
+      operatorProfileCommand(
+        project,
+        "approve-update",
+        "coding",
+        revision.digest,
+      ),
+    /busy/,
+  );
+  requireSuccess(docker(["rm", "-f", codingName]));
+  requireSuccess(
+    operatorProfileCommand(
+      project,
+      "approve-update",
+      "coding",
+      revision.digest,
+    ),
+  );
+  requireSuccess(run("coding", "synthetic-revised-instruction", true));
+  assert.equal(
+    operatorProfileCommand(project, "approve-update", "coding", revision.digest)
+      .status,
+    1,
+  );
   console.log(
     "PASS: installed profile workers, private volumes/configuration, real shell/tool denials, concurrency, truncation recovery, builder/operator admission and persistence.",
   );

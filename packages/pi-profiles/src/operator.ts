@@ -8,15 +8,23 @@ async function main() {
   const [action, id, digest, ...rest] = process.argv.slice(2);
   if (!id || rest.length) throw new Error();
   const reviewed = await reviewProposal("/proposals", id);
-  // The launcher mounts only the builder's proposals, not a model-selected source.
-  if (
+  const update = action === "review-update" || action === "approve-update";
+  // The launcher chooses the source volume. Metadata cannot select another one.
+  if (update) {
+    if (
+      reviewed.provenance.origin !== id ||
+      reviewed.provenance.operation !== "update"
+    )
+      throw new Error();
+  } else if (
     reviewed.provenance.origin !== "profile-builder" ||
     reviewed.provenance.operation !== "create"
-  )
+  ) {
     throw new Error();
-  if (action === "review" && !digest) {
+  }
+  if ((action === "review" || action === "review-update") && !digest) {
     console.log(JSON.stringify(reviewed, null, 2));
-  } else if (action === "approve" && digest) {
+  } else if ((action === "approve" || action === "approve-update") && digest) {
     const snapshot = await mkdtemp(join(tmpdir(), "rex-admission-"));
     try {
       const home = join(snapshot, id);

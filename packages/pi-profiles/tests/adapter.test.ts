@@ -111,11 +111,17 @@ async function fixture(t: TestContext) {
     ...options,
     received,
     replies,
-    run: (id: string, prompt = "Synthetic task", newSession = false) =>
+    run: (
+      id: string,
+      prompt = "Synthetic task",
+      newSession = false,
+      maintain = false,
+    ) =>
       runProfileRequest({
         ...options,
         input: `profile: ${id}\n${prompt}`,
         newSession,
+        maintain,
         signal: AbortSignal.timeout(10000),
       }),
   };
@@ -372,6 +378,106 @@ test("busy profiles fail closed without making a model call", async (t) => {
   );
   await assert.rejects(f.run("coding"), /busy/);
   assert.equal(f.received.length, 0);
+});
+
+test("self-update is absent unless the operator requested maintenance", async (t) => {
+  const f = await fixture(t);
+  const shared = join(f.profilesRoot, "shared");
+  await mkdir(shared);
+  await writeFile(join(shared, "configuration.json"), '{"version":2}\n');
+  f.replies.push(
+    {
+      tool: "revise_profile",
+      args: {
+        id: "coding",
+        instructions: "Synthetic revised instruction.",
+      },
+    },
+    { text: "denied" },
+  );
+  const result = await f.run("coding");
+  assert.equal(result.toolNames.includes("revise_profile"), false);
+  assert.equal(result.output, "denied");
+  assert.deepEqual(await readdir(f.proposalsRoot), []);
+  assert.equal(
+    await readFile(join(shared, "configuration.json"), "utf8"),
+    '{"version":2}\n',
+  );
+});
+
+test("maintenance drafts a narrower change only for the running profile", async (t) => {
+  const f = await fixture(t);
+  const shared = join(f.profilesRoot, "shared");
+  await mkdir(shared);
+  const sharedText = '{"version":2}\n';
+  await writeFile(join(shared, "configuration.json"), sharedText);
+  const active = await readFile(
+    join(f.profilesRoot, "coding", "profile.json"),
+    "utf8",
+  );
+  f.replies.push(
+    {
+      tool: "revise_profile",
+      args: {
+        id: "research",
+        instructions: "Must not revise research.",
+      },
+    },
+    { text: "rejected" },
+  );
+  await f.run("coding", "Revise another profile", false, true);
+  assert.deepEqual(await readdir(f.proposalsRoot), []);
+
+  f.replies.push(
+    {
+      tool: "revise_profile",
+      args: {
+        id: "coding",
+        instructions: "Synthetic revised instruction.",
+        whitelist: ["*"],
+        blacklist: [],
+      },
+    },
+    { text: "rejected" },
+  );
+  await f.run("coding", "Add a tool", false, true);
+  assert.deepEqual(await readdir(f.proposalsRoot), []);
+
+  f.replies.push(
+    {
+      tool: "revise_profile",
+      args: {
+        id: "coding",
+        instructions: "Synthetic revised instruction.",
+        whitelist: ["read", "ls"],
+        blacklist: ["bash", "edit", "write", "propose_profile"],
+      },
+    },
+    { text: "drafted" },
+  );
+  const result = await f.run("coding", "Revise coding", false, true);
+  assert.equal(result.toolNames.includes("revise_profile"), true);
+  assert.equal(result.output, "drafted");
+  const reviewed = await reviewProposal(f.proposalsRoot, "coding");
+  assert.equal(reviewed.provenance.operation, "update");
+  assert.equal(reviewed.provenance.origin, "coding");
+  assert.equal(reviewed.provenance.baseDigest?.length, 64);
+  assert.equal(
+    reviewed.definition.configuration?.instructions,
+    "Synthetic revised instruction.",
+  );
+  assert.equal(
+    reviewed.definition.configuration?.tools.whitelist.includes("bash"),
+    false,
+  );
+  assert.equal(
+    await readFile(join(f.profilesRoot, "coding", "profile.json"), "utf8"),
+    active,
+  );
+  assert.equal(
+    await readFile(join(shared, "configuration.json"), "utf8"),
+    sharedText,
+  );
 });
 
 test("profile-builder creates only a draft through the actual Pi tool loop", async (t) => {

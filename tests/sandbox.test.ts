@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { withProfileLock } from "../scripts/profile-worker.ts";
+import {
+  operatorProposalVolume,
+  withProfileLock,
+  workerVolumes,
+} from "../scripts/profile-worker.ts";
 import { ROOT } from "../scripts/repo-check.ts";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -352,21 +356,49 @@ test("sandbox build context permits only named public runtime files", () => {
 });
 
 test("rex input parsing stays explicit, bounded and option-safe", () => {
-  assert.deepEqual(parseRexInput([]), { newSession: false, input: null });
-  assert.deepEqual(parseRexInput(["--new-session"]), {
-    newSession: true,
+  assert.deepEqual(parseRexInput([]), {
+    newSession: false,
+    maintain: false,
     input: null,
   });
-  assert.deepEqual(parseRexInput(["profile: coding\nHi"]), {
-    newSession: false,
-    input: "profile: coding\nHi",
-  });
-  assert.deepEqual(parseRexInput(["--new-session", "profile: coding\nHi"]), {
+  assert.deepEqual(parseRexInput(["--new-session"]), {
     newSession: true,
-    input: "profile: coding\nHi",
+    maintain: false,
+    input: null,
   });
+  assert.deepEqual(parseRexInput(["--maintain", "--new-session"]), {
+    newSession: true,
+    maintain: true,
+    input: null,
+  });
+  assert.deepEqual(
+    parseRexInput(["--new-session", "--maintain", "profile: coding\nHi"]),
+    {
+      newSession: true,
+      maintain: true,
+      input: "profile: coding\nHi",
+    },
+  );
   assert.throws(() => parseRexInput(["a", "b"]));
   assert.throws(() => parseRexInput(["--new-session", "--more"]));
+  assert.throws(() => parseRexInput(["--maintain", "--maintain"]));
+});
+
+test("update approval reads only the target profile draft volume", () => {
+  const coding = workerVolumes("rex-check", "coding").proposals;
+  const builder = workerVolumes("rex-check", "profile-builder").proposals;
+  assert.equal(
+    operatorProposalVolume("rex-check", "approve-update", "coding"),
+    coding,
+  );
+  assert.notEqual(
+    operatorProposalVolume("rex-check", "approve-update", "coding"),
+    builder,
+  );
+  assert.equal(
+    operatorProposalVolume("rex-check", "approve", "synthetic-helper"),
+    builder,
+  );
 });
 
 test("worker launchers are isolated by construction", () => {
@@ -449,6 +481,7 @@ test("sandbox CLI rejects unknown actions and unconfirmed reset without invoking
     ["refresh", "extra"],
     ["review-profile", "../invalid"],
     ["approve-profile", "coding", "invalid-digest"],
+    ["approve-update", "coding", "invalid-digest"],
   ]) {
     assert.equal(captureLogs(() => sandboxMain(args)).result, 1);
   }

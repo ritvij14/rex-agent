@@ -24,11 +24,16 @@ const HELPER_LIMITS = [
 
 export function parseRexInput(args: string[]) {
   const rest = [...args];
-  const newSession = rest[0] === "--new-session";
-  if (newSession) rest.shift();
-  if (rest.length > 1 || rest[0]?.startsWith("--"))
-    throw new Error("Invalid profile arguments.");
-  return { newSession, input: rest[0] ?? null };
+  let newSession = false;
+  let maintain = false;
+  while (rest[0]?.startsWith("--")) {
+    if (rest[0] === "--new-session" && !newSession) newSession = true;
+    else if (rest[0] === "--maintain" && !maintain) maintain = true;
+    else throw new Error("Invalid profile arguments.");
+    rest.shift();
+  }
+  if (rest.length > 1) throw new Error("Invalid profile arguments.");
+  return { newSession, maintain, input: rest[0] ?? null };
 }
 
 export function readRexInput() {
@@ -171,6 +176,7 @@ export function runProfileWorker(options: {
   profile: string;
   input?: string;
   newSession?: boolean;
+  maintain?: boolean;
   command?: string[];
 }) {
   validateProfileId(options.profile);
@@ -254,6 +260,7 @@ export function runProfileWorker(options: {
         name,
       });
       if (options.newSession && !options.command) args.push("--new-session");
+      if (options.maintain && !options.command) args.push("--maintain");
       return docker(args, options.input);
     } finally {
       // A killed Docker client is not proof that its worker stopped.
@@ -269,14 +276,24 @@ export function runProfileWorker(options: {
   });
 }
 
+export function operatorProposalVolume(
+  project: string,
+  action: "review" | "approve" | "review-update" | "approve-update",
+  id: string,
+) {
+  validateProfileId(id);
+  const origin = action.endsWith("update") ? id : "profile-builder";
+  return workerVolumes(project, origin).proposals;
+}
+
 export function operatorProfileCommand(
   project: string,
-  action: "review" | "approve",
+  action: "review" | "approve" | "review-update" | "approve-update",
   id: string,
   digest?: string,
 ) {
   validateProfileId(id);
-  const origin = "profile-builder";
+  const origin = action.endsWith("update") ? id : "profile-builder";
   return withProfileLock(project, origin, () =>
     docker([
       "run",
@@ -300,7 +317,7 @@ export function operatorProfileCommand(
       "-v",
       `${project}_profile-definitions:/profiles`,
       "-v",
-      `${workerVolumes(project, origin).proposals}:/proposals:ro`,
+      `${operatorProposalVolume(project, action, id)}:/proposals:ro`,
       IMAGE,
       ...NODE,
       "/opt/rex/packages/pi-profiles/src/operator.ts",

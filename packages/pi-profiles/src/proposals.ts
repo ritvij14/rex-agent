@@ -14,10 +14,11 @@ import {
   lookupProfile,
   parseProfileDefinition,
   ProfileError,
+  resolveEffectiveProfile,
   type Profile,
   type ProfileDefinition,
 } from "@rex/profiles";
-import { requireRunnable } from "./policy.ts";
+import { narrowsTools, requireRunnable } from "./policy.ts";
 
 export interface ProposalProvenance {
   readonly operation: "create" | "update";
@@ -301,6 +302,33 @@ export async function approveProposal(
       throw new Error(
         "The shared configuration changed since the update draft was made.",
       );
+    }
+    const current = await lookupProfile(profiles, id);
+    let sharedConfiguration;
+    try {
+      sharedConfiguration = await loadSharedConfiguration(
+        join(profiles, "shared"),
+      );
+    } catch (error) {
+      if (
+        !(error instanceof ProfileError) ||
+        error.code !== "SHARED_CONFIGURATION_UNAVAILABLE"
+      ) {
+        throw error;
+      }
+    }
+    const currentTools = resolveEffectiveProfile(current, sharedConfiguration)
+      .configuration?.tools;
+    const proposedTools = resolveEffectiveProfile(
+      reviewed.definition,
+      sharedConfiguration,
+    ).configuration?.tools;
+    if (
+      !currentTools ||
+      !proposedTools ||
+      !narrowsTools(currentTools, proposedTools)
+    ) {
+      throw new Error("A profile revision cannot add tools.");
     }
   } else {
     await vacant(join(profiles, id));

@@ -19,7 +19,7 @@ import {
   type SharedConfiguration,
 } from "@rex/profiles";
 import { createProposal } from "./proposals.ts";
-import { requireRunnable, TOOL_NAMES } from "./policy.ts";
+import { narrowsTools, requireRunnable, TOOL_NAMES } from "./policy.ts";
 export {
   createProposal,
   reviewProposal,
@@ -46,6 +46,7 @@ export interface ProfileRequestOptions {
   input: string;
   baseUrl: string;
   newSession?: boolean;
+  maintain?: boolean;
   signal?: AbortSignal;
 }
 
@@ -151,6 +152,9 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         const toolNames = TOOL_NAMES.filter((name) =>
           isToolAllowed(config.tools, name),
         );
+        const visible = options.maintain
+          ? [...toolNames, "revise_profile"]
+          : toolNames;
         const denied: string[] = [];
         const proposalParameters = Type.Object(
           {
@@ -205,6 +209,82 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
             };
           },
         };
+        const revisionParameters = Type.Object(
+          {
+            id: Type.String(),
+            instructions: Type.Optional(Type.String()),
+            model: Type.Optional(Type.String()),
+            whitelist: Type.Optional(Type.Array(Type.String())),
+            blacklist: Type.Optional(Type.Array(Type.String())),
+          },
+          { additionalProperties: false },
+        );
+        const revisionTool: ToolDefinition<typeof revisionParameters> = {
+          name: "revise_profile",
+          label: "Revise profile",
+          description:
+            "Draft a change to this profile only. The operator must approve it. It cannot add tools or edit shared settings.",
+          parameters: revisionParameters,
+          async execute(_id, params, signal) {
+            signal?.throwIfAborted();
+            runtime.current();
+            if (!options.maintain || !profile.configuration)
+              throw new Error("Tool denied by profile policy.");
+            if (params.id !== profile.id) {
+              throw new Error(
+                "An existing profile may be updated only by a draft from the same profile.",
+              );
+            }
+            const tools = {
+              whitelist: params.whitelist ?? [
+                ...profile.configuration.tools.whitelist,
+              ],
+              blacklist: params.blacklist ?? [
+                ...profile.configuration.tools.blacklist,
+              ],
+            };
+            const next = {
+              id: profile.id,
+              home: profile.home,
+              configuration: {
+                instructions:
+                  params.instructions ?? profile.configuration.instructions,
+                model: params.model
+                  ? { provider: "cli-proxy" as const, id: params.model }
+                  : profile.configuration.model,
+                tools,
+              },
+            };
+            const proposed = resolveEffectiveProfile(
+              next,
+              shared,
+            ).configuration;
+            if (!proposed || !narrowsTools(config.tools, proposed.tools)) {
+              throw new Error("A profile revision cannot add tools.");
+            }
+            const proposal = await createProposal(
+              options.profilesRoot,
+              options.proposalsRoot,
+              {
+                id: next.id,
+                configuration: next.configuration,
+              },
+              { operation: "update", origin: profile.id },
+            );
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ...proposal,
+                    status: "draft-requires-approval",
+                  }),
+                },
+              ],
+              details: proposal,
+            };
+          },
+        };
         let requests = 0;
         const loader = new DefaultResourceLoader({
           cwd: options.cwd.trim(),
@@ -222,6 +302,16 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
             (pi) => {
               pi.on("tool_call", (event) => {
                 runtime.current();
+                if (event.toolName === "revise_profile") {
+                  if (!options.maintain) {
+                    denied.push(event.toolName);
+                    return {
+                      block: true,
+                      reason: "Tool denied by profile policy.",
+                    };
+                  }
+                  return;
+                }
                 if (
                   !TOOL_NAMES.some((name) => name === event.toolName) ||
                   !isToolAllowed(config.tools, event.toolName)
@@ -264,9 +354,11 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           modelRuntime,
           model,
           thinkingLevel: "off",
-          tools: [...toolNames],
+          tools: [...visible],
           excludeTools: TOOL_NAMES.filter((name) => !toolNames.includes(name)),
-          customTools: [proposalTool],
+          customTools: options.maintain
+            ? [proposalTool, revisionTool]
+            : [proposalTool],
           resourceLoader: loader,
           settingsManager: settings,
           sessionManager: manager,
@@ -309,7 +401,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           return {
             profileId: profile.id,
             model: config.model.id,
-            toolNames,
+            toolNames: visible,
             denied,
             sessionFile: session.sessionFile,
             output: answers

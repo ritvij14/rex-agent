@@ -19,4 +19,4 @@ Observe the active definitions, not the model's claim that a profile was created
 
 ## Gotchas and coverage limits
 
-The installed path binds the origin to the builder's actual volume, not mutable provenance text. Other workers cannot access that volume. The helper currently accepts creation only; library update tests are not proof of installed self-maintenance. Review/approval locks the source profile, then snapshots and validates the exact reviewed content. Tests use only invented operator authority, never normal drafts or active profiles. Do not repair a broken real draft or weaken its permissions to make admission pass.
+The installed create path binds the origin to the builder's actual volume, not mutable provenance text. `approve-update` binds the origin to that profile's own volume and rejects added tools. Other workers cannot access either volume. Review/approval locks the source profile, then snapshots and validates the exact reviewed content. Tests use only invented operator authority, never normal drafts or active profiles. Do not repair a broken real draft or weaken its permissions to make admission pass.

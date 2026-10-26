@@ -245,3 +245,11 @@
 **Reason:** the owner wants the existing writer and reader to stay, and wants one more profile that can run checks while the package is tested. Profile text for real use comes later, from the owner.
 
 **Verification:** the shipped-profile adapter test failed with a missing `qa` file before the template existed. Disposable acceptance runs `qa`, rejects its write tool, and checks that its shell sees only its own configuration snapshot.
+
+## 025: Same-profile maintenance is an explicit host flag
+
+**Decision:** `rex --maintain` is the only way to expose `revise_profile`. Profile files cannot grant it. The tool drafts an update only for the running profile. It may change instructions or model, and it may only remove tools. `approve-update` locks that profile, reads only its proposal volume, rejects tool expansion, and writes the master. The running container is not edited. The next launch copies the new revision.
+
+**Reason:** an existing profile must be able to propose its own change without being able to edit another profile, shared settings, or its own permissions. The operator still approves the exact digest.
+
+**Verification:** a forced call without the flag writes nothing. A foreign id and an added tool are rejected. Approval of an added tool fails and preserves the active profile. Disposable acceptance drafts a coding revision, rejects a wrong digest and a busy profile, activates the exact digest, and sees the new instruction on a new session.

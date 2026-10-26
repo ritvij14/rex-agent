@@ -70,6 +70,15 @@ async function main() {
           (message: { role: string }) => message.role === "user",
         );
         const text = JSON.stringify(user?.content ?? "");
+        const requestText = JSON.stringify(payload);
+        if (
+          text.includes("synthetic-revised-instruction") &&
+          !requestText.includes("Synthetic revised instruction.")
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"revised instruction was not loaded"}');
+          return;
+        }
         const truncated = text.includes("synthetic-truncated-response");
         if (
           text.includes("synthetic-cap-free-response") &&
@@ -115,6 +124,15 @@ async function main() {
               content: "synthetic",
             },
             failed: true,
+          },
+          "synthetic-self-update": {
+            name: "revise_profile",
+            args: {
+              id: "coding",
+              instructions: "Synthetic revised instruction.",
+              whitelist: ["read", "ls"],
+              blacklist: ["bash", "edit", "write", "propose_profile"],
+            },
           },
           "synthetic-create-profile": {
             name: "propose_profile",

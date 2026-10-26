@@ -224,6 +224,32 @@ test("replayed and stale update proposals fail and preserve the prior revision",
   );
 });
 
+test("update approval rejects a draft that adds tools", async (t) => {
+  const f = await fixture(t);
+  const proposal = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    {
+      ...v1Draft("helper", "Expanded persona."),
+      configuration: {
+        ...v1Draft("helper").configuration,
+        instructions: "Expanded persona.",
+        tools: { whitelist: ["read", "bash"], blacklist: [] },
+      },
+    },
+    UPDATE("helper"),
+  );
+  await assert.rejects(
+    approveProposal(f.profilesRoot, f.proposalsRoot, "helper", proposal.digest),
+    /add tools/,
+  );
+  assert.equal(
+    (await lookupProfile(f.profilesRoot, "helper")).configuration?.tools
+      .whitelist.length,
+    1,
+  );
+});
+
 test("update proposals fail when the shared configuration changed", async (t) => {
   const f = await fixture(t);
   await seedShared(f.profilesRoot);

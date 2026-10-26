@@ -247,7 +247,7 @@ export function main(args: string[]): number {
         ...rest,
       ]);
     else if (command === "rex") {
-      const { newSession, input } = parseRexInput(rest);
+      const { newSession, maintain, input } = parseRexInput(rest);
       const request = input ?? readRexInput();
       const { profileId } = parseProfileRequest(request);
       const result = runProfileWorker({
@@ -255,6 +255,7 @@ export function main(args: string[]): number {
         profile: profileId,
         input: request,
         newSession,
+        maintain,
       });
       if (result.status !== 0) {
         console.error(
@@ -266,15 +267,26 @@ export function main(args: string[]): number {
       }
       process.stdout.write(result.stdout);
     } else if (
-      (command === "review-profile" && rest.length === 1) ||
-      (command === "approve-profile" && rest.length === 2)
+      ((command === "review-profile" || command === "review-update") &&
+        rest.length === 1) ||
+      ((command === "approve-profile" || command === "approve-update") &&
+        rest.length === 2)
     ) {
       validateProfileId(rest[0]);
-      if (command === "approve-profile" && !/^[a-f0-9]{64}$/.test(rest[1]!))
+      if (
+        (command === "approve-profile" || command === "approve-update") &&
+        !/^[a-f0-9]{64}$/.test(rest[1]!)
+      )
         throw new Error();
       const result = operatorProfileCommand(
         PROJECT,
-        command === "review-profile" ? "review" : "approve",
+        command === "review-profile"
+          ? "review"
+          : command === "review-update"
+            ? "review-update"
+            : command === "approve-profile"
+              ? "approve"
+              : "approve-update",
         rest[0]!,
         rest[1],
       );
@@ -292,7 +304,7 @@ export function main(args: string[]): number {
       ]);
     } else {
       console.log(
-        "Usage: npm run sandbox -- build|start|refresh|stop|shell|pi|rex|check|review-profile ID|approve-profile ID DIGEST|configure MODEL_ID API|reset --confirm",
+        "Usage: npm run sandbox -- build|start|refresh|stop|shell|pi|rex|check|review-profile ID|approve-profile ID DIGEST|review-update ID|approve-update ID DIGEST|configure MODEL_ID API|reset --confirm",
       );
       return 1;
     }

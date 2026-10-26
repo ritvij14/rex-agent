@@ -4,8 +4,14 @@ import { IncompleteProfileResponseError, runProfileRequest } from "./index.ts";
 
 async function main() {
   const args = process.argv.slice(2);
-  const newSession = args[0] === "--new-session";
-  if (newSession) args.shift();
+  let newSession = false;
+  let maintain = false;
+  while (args[0]?.startsWith("--")) {
+    if (args[0] === "--new-session" && !newSession) newSession = true;
+    else if (args[0] === "--maintain" && !maintain) maintain = true;
+    else throw new Error();
+    args.shift();
+  }
   if (args.length > 1) throw new Error();
   let input = args[0] ?? "";
   if (!args.length) {
@@ -32,6 +38,7 @@ async function main() {
     baseUrl: "http://127.0.0.1:8317/v1",
     input,
     newSession,
+    maintain,
     signal: AbortSignal.timeout(90000),
   });
   console.log(`[profile=${result.profileId} model=${result.model}]`);

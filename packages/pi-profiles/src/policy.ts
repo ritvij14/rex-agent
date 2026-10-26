@@ -1,4 +1,8 @@
-import { type ProfileConfiguration } from "@rex/profiles";
+import {
+  isToolAllowed,
+  type ProfileConfiguration,
+  type ToolPolicy,
+} from "@rex/profiles";
 
 export const TOOL_NAMES = [
   "read",
@@ -8,6 +12,12 @@ export const TOOL_NAMES = [
   "ls",
   "propose_profile",
 ] as const;
+
+export function narrowsTools(current: ToolPolicy, proposed: ToolPolicy) {
+  return TOOL_NAMES.every(
+    (name) => !isToolAllowed(proposed, name) || isToolAllowed(current, name),
+  );
+}
 
 export function requireRunnable(config?: ProfileConfiguration) {
   if (
