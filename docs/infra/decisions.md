@@ -205,3 +205,13 @@
 **Publication impact:** only skill Markdown under the existing admitted `.agents/skills/` paths is added. No ignore rules, hooks, CI permissions or scanner settings change.
 
 **Verification:** the skill-loading test requires Pi to discover all ten skills without diagnostics and fails when any skill names a missing file; a synthetic skill with planted broken references proves the check detects them. A further test fails when the root guide does not route to a skill by an existing path, observed failing before the table existed. Whether the workflows make real tasks faster remains for owner review on future work.
+
+## 021: SOUL personas, shared defaults and one-file minimal profiles
+
+**Decision:** each profile's persona and instructions live in `SOUL.md` (owner-chosen naming), and the minimal profile is a single `SOUL.md` under its ID directory with no `profile.json`. The operator owns a reserved `shared/` directory with an optional shared `SOUL.md` and a version-2 `configuration.json` supplying default model/tool settings plus a mandatory blacklist that no profile or override can remove. Versioned profile manifests (currently version 2 with optional `model`/`tools` overrides) may later add skills, MCP servers and other resources progressively. Whitelists replace shared grants; blacklists union across profile, shared defaults and mandatory denials. Mixed sources (inline instructions plus `SOUL.md`, or version-2 fields beyond the schema) fail closed.
+
+**Reason:** the owner wants an open-ended set of file-defined profiles with high customization control but minimal setup cost, and shared settings that apply to every profile. `SOUL.md` keeps the persona in one obvious file; the reserved shared directory keeps defaults and mandatory policy operator-owned rather than editable by any single profile.
+
+**Tradeoff:** shared defaults are enforced per worker only when the execution boundary supplies them; until worker isolation (a later unit), the adapter treats a missing shared configuration as a version-1-only environment and fails closed for SOUL profiles without it. Lists have asymmetric merge semantics (replace vs union) that must stay documented. Instructions still are not permission enforcement.
+
+**Verification:** core tests cover shared validation/failure codes, minimal one-file profiles, override/union composition, mandatory denials, mixed-source and unknown-field rejection, reserved `shared`, and frozen outputs. Adapter tests drive a minimal SOUL profile through real Pi sessions with shared defaults and prove SOUL profiles fail closed before inference without shared configuration.

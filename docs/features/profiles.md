@@ -2,15 +2,25 @@
 
 ## Implemented boundary
 
-`@rex/profiles` provides validated profile lookup, immutable per-turn asynchronous scope, a minimal configuration schema, prompt-selector parsing and pure tool-policy evaluation. It uses Node built-ins only. `@rex/pi-profiles` separately connects that contract to Pi 1.3.0 through a one-request SDK command in the terminal sandbox.
+`@rex/profiles` provides validated profile lookup, immutable per-turn asynchronous scope, a versioned configuration schema with `SOUL.md` persona files, shared operator defaults, prompt-selector parsing and pure tool-policy evaluation. It uses Node built-ins only. `@rex/pi-profiles` separately connects that contract to Pi 1.3.0 through a one-request SDK command in the terminal sandbox.
 
-The command requires the first line `profile: <id>`, followed by a nonempty task. There is no natural-language guessing or default profile. The Jev router, user model overrides, fallback chains, memory engine, skills/MCP configuration and Pi Durable are not implemented. The existing Pi TUI remains an unprofiled baseline; `rex` is the profile-selected interface.
+The command requires the first line `profile: <id>`, followed by a nonempty task. There is no natural-language guessing or default profile. The Jev router, model fallback chains, memory engine, skills/MCP configuration and Pi Durable are not implemented. The existing Pi TUI remains an unprofiled baseline; `rex` is the profile-selected interface.
+
+## Shared configuration and minimal SOUL profiles
+
+A profiles root may contain an operator-owned `shared/` directory. `shared` is a reserved profile ID. The directory holds an optional `SOUL.md` persona applied to every version-2 profile and a required `configuration.json` with `{ "version": 2, ... }` and any of `model`, `tools`, and `mandatory.tools.blacklist`. Model and tool rules follow the same validation as profile definitions. Anything the shared directory misparses fails closed with `INVALID_SHARED_CONFIGURATION`; a missing root fails with `SHARED_CONFIGURATION_UNAVAILABLE`.
+
+The minimal runnable profile is one file: `<profiles-root>/<id>/SOUL.md` (a regular non-symlink file of at most 16384 bytes with non-whitespace content). No `profile.json` is needed; the shared model and tool defaults apply. An optional `<id>/profile.json` with `{ "version": 2, "id": "<same-id>", "model"?, "tools"? }` replaces shared defaults field-by-field. Overrides follow two deliberate rules: a configured whitelist replaces the shared whitelist (grants are replaced), while blacklists are unioned with the profile's list, the shared list and the mandatory blacklist in that order, so neither the profile nor the shared defaults can weaken mandatory denials. Whitelists and blacklists are still bounded to 64 rules each.
+
+`resolveEffectiveProfile(profile, shared)` produces the frozen effective `{ instructions, model, tools }`: shared `SOUL.md` and profile `SOUL.md` are concatenated (`shared + "\n\n" + own`), the model resolves profile-override-first, and tool policy resolves as above. Resolution fails with `PROFILE_INCOMPLETE` when no model can be determined or when a legacy `{ "id" }`-only profile is resolved. Instructions remain literal text, never executable resources, and permission enforcement stays outside the model; `SOUL.md` cannot grant tools.
+
+Version 2 definitions reject inline `instructions` together with `SOUL.md` (contradictory sources are invalid) and any field outside `id`/`version`/`model`/`tools`. A version field other than 2 fails with `UNSUPPORTED_PROFILE_VERSION`. Resource files, model fallbacks and reasoning settings are not expressed in this schema yet and remain future units.
 
 ## Definitions and lookup
 
 The caller supplies an absolute profiles root. A validated ID maps directly to `<profiles-root>/<profile-id>/`, with no profile aliases or custom per-profile paths. IDs contain 1–64 lowercase ASCII letters/digits and single separating hyphens, starting with a letter. Root paths are trimmed/canonicalized; IDs are not corrected. Missing, mismatched, malformed or symlinked homes/definitions fail without substitution. Definitions must be regular files of at most 4096 bytes, including whitespace. Lookup failures use fixed codes/messages rather than echoing input or filesystem diagnostics.
 
-The original `{ "id": "coding" }` definition remains valid for core scope tests but is not runnable through Pi. A runnable, synthetic definition is:
+The original `{ "id": "coding" }` definition remains valid for core scope tests but is not runnable through Pi. A runnable, synthetic version-1 definition is:
 
 ```json
 {
@@ -33,11 +43,13 @@ Import through `@rex/profiles`, never internal files. Root tooling runs this pri
 
 | API | Contract |
 | --- | --- |
-| `lookupProfile(root, id)` | Return frozen `{ id, home, configuration? }` after validation |
+| `lookupProfile(root, id)` | Return frozen `{ id, home, configuration?, soul?, model?, tools? }` after validation |
+| `loadSharedConfiguration(root)` | Validate and freeze the operator-shared configuration from `<root>/shared` |
+| `resolveEffectiveProfile(profile, shared?)` | Pure composition of shared defaults, SOUL personas, overrides and mandatory denials |
 | `new ProfileRuntime(root)` | Own independent asynchronous turn storage |
 | `runtime.run(id, work, { signal? })` | Look up the selected ID and run the complete callback under its fixed profile |
 | `runtime.current()` | Return the current profile; reject missing, closed or cancelled scopes |
-| `parseProfileDefinition`, `parseProfileRequest`, `isToolAllowed` | Validate data, require the selector, and evaluate tool rules without Pi |
+| `parseProfileDefinition`, `parseSharedConfiguration`, `parseProfileRequest`, `isToolAllowed` | Validate data, require the selector, and evaluate tool rules without Pi |
 
 `validateProfileId`, `ProfileError`/`ProfileErrorCode` and the profile/configuration/policy/run-option types are also exported. Definitions are revalidated for every turn; a running turn keeps its frozen selection. The runtime accepts an ID, not a caller-fabricated home.
 
@@ -87,7 +99,7 @@ See [sandbox operations](../infra/terminal-sandbox.md) for exact commands and st
 
 ## Verification
 
-`npm run test:profiles` covers core lookup, immutable scopes, schema/policy and selector rules. `npm test` additionally runs real Pi SDK sessions/tools against a local synthetic endpoint: permitted writes/reads, forced denied calls, separate/resumed/new histories, no inherited executable resources, cancellation/lock cleanup, bounded tool loops, provider failure handling, drafts and digest-bound admission. No accounts or real private state are needed.
+`npm run test:profiles` covers core lookup, immutable scopes, shared configuration, SOUL personas, override/mandatory composition and schema/policy/selector rules. `npm test` additionally runs real Pi SDK sessions/tools against a local synthetic endpoint: permitted writes/reads, forced denied calls, separate/resumed/new histories, no inherited executable resources, minimal SOUL profiles resolving shared defaults (and failing closed without them), cancellation/lock cleanup, bounded tool loops, provider failure handling, drafts and digest-bound admission. No accounts or real private state are needed.
 
 `npm run typecheck` uses strict NodeNext for the core/repository and a separate strict Bundler/DOM configuration for the Pi adapter, because Pi's published declarations include JSON imports and web-provider types. The adapter pins the optional MCP SDK as a development-only declaration dependency required by Google's types; it does not enable an MCP service. Declaration checking remains enabled; no vendored declarations are patched or ignored.
 

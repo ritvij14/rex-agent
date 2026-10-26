@@ -37,7 +37,7 @@ export async function createProposal(
   input: unknown,
 ) {
   const definition = parseProfileDefinition(input);
-  requireRunnable(definition);
+  requireRunnable(definition.configuration);
   const data = serialize(definition);
   const profiles = await root(profilesRoot);
   const proposals = await root(proposalsRoot);
@@ -58,7 +58,7 @@ export async function reviewProposal(proposalsRoot: string, id: string) {
     id: profile.id,
     configuration: profile.configuration,
   });
-  requireRunnable(definition);
+  requireRunnable(definition.configuration);
   return { definition, digest: serialize(definition).digest };
 }
 

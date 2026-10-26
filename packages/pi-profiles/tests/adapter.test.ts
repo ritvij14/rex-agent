@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { lookupProfile } from "@rex/profiles";
+import { lookupProfile, ProfileError } from "@rex/profiles";
 import {
   runProfileRequest,
   createProposal,
@@ -445,4 +445,66 @@ test("approval is digest-bound, validated, non-overwriting and separate from dra
     await readFile(join(f.profilesRoot, proposal.id, "profile.json"), "utf8"),
     JSON.stringify(reviewed.definition),
   );
+});
+
+test("a minimal SOUL-only profile runs with shared defaults", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "shared"));
+  await writeFile(
+    join(f.profilesRoot, "shared", "configuration.json"),
+    JSON.stringify({
+      version: 2,
+      model: { provider: "cli-proxy", id: "glm-5.3-flash-cloud" },
+      tools: { whitelist: ["read", "ls"], blacklist: ["bash"] },
+      mandatory: { tools: { blacklist: ["propose_profile"] } },
+    }),
+  );
+  await writeFile(
+    join(f.profilesRoot, "shared", "SOUL.md"),
+    "Shared synthetic persona.",
+  );
+  await mkdir(join(f.profilesRoot, "minimal"));
+  await writeFile(
+    join(f.profilesRoot, "minimal", "SOUL.md"),
+    "Minimal persona.",
+  );
+
+  f.replies.push({ tool: "bash", args: { command: "echo ignored" } });
+  const result = await f.run("minimal");
+  assert.equal(result.profileId, "minimal");
+  assert.equal(result.model, "glm-5.3-flash-cloud");
+  assert.equal(result.output, "synthetic done");
+  const request = f.received.at(-1)!;
+  assert.equal(request.model, "glm-5.3-flash-cloud");
+  assert.ok(
+    JSON.stringify(request.messages).includes("Shared synthetic persona."),
+  );
+  assert.ok(JSON.stringify(request.messages).includes("Minimal persona."));
+  const tools = request.tools?.map((tool) => tool.function.name) ?? [];
+  assert.deepEqual([...tools].sort(), ["ls", "read"]);
+  const toolMessages = f.received.flatMap((req) =>
+    req.messages.filter((message) => message.role === "tool"),
+  );
+  assert.ok(
+    toolMessages.some((message) =>
+      /denied|not found|not available|unknown/i.test(
+        JSON.stringify(message.content),
+      ),
+    ),
+  );
+  assert.deepEqual(await readdir(f.cwd), []);
+});
+
+test("SOUL-only profiles fail closed without shared configuration", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "minimal"));
+  await writeFile(
+    join(f.profilesRoot, "minimal", "SOUL.md"),
+    "Minimal persona.",
+  );
+  await assert.rejects(
+    f.run("minimal"),
+    (error) => error instanceof ProfileError,
+  );
+  assert.equal(f.received.length, 0);
 });

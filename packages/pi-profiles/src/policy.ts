@@ -1,4 +1,4 @@
-import { type ProfileDefinition } from "@rex/profiles";
+import { type ProfileConfiguration } from "@rex/profiles";
 
 export const TOOL_NAMES = [
   "read",
@@ -9,8 +9,7 @@ export const TOOL_NAMES = [
   "propose_profile",
 ] as const;
 
-export function requireRunnable(definition: ProfileDefinition) {
-  const config = definition.configuration;
+export function requireRunnable(config?: ProfileConfiguration) {
   if (
     !config ||
     config.model.provider !== "cli-proxy" ||

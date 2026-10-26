@@ -8,8 +8,8 @@ The normal user entry is `npm run sandbox -- rex` with an input beginning `profi
 
 ## Repeatable checks
 
-- Run `npm run test:profiles` for validated lookup, malformed/missing profiles, immutable concurrent scopes and cancellation.
-- Run `node --import tsx --test packages/pi-profiles/tests/adapter.test.ts packages/pi-profiles/tests/boundaries.test.ts` for actual SDK tool effects, forged denied calls, separate/resumed/new histories, locks, failures and cancellation.
+- Run `npm run test:profiles` for validated lookup, malformed/missing profiles, shared configuration and SOUL composition, immutable concurrent scopes and cancellation.
+- Run `node --import tsx --test packages/pi-profiles/tests/adapter.test.ts packages/pi-profiles/tests/boundaries.test.ts` for actual SDK tool effects, shared-default SOUL profiles, forced denied calls, separate/resumed/new histories, locks, failures and cancellation.
 - Run `npm run verify -- sandbox` to build and exercise the installed `rex --new-session` command under synthetic inference, including selector rejection, cap-free requests, truncation reported on stderr with exit 1 and no partial stdout, and a successful resumed request. The suite also checks installed SDK response handling through a private loopback fake provider and asserts Pi's installed version and read-only runtime/package boundaries.
 
 ## Expected observations
@@ -20,4 +20,4 @@ Requests must not include a blanket output-token cap. A provider-truncated answe
 
 ## Gotchas and coverage limits
 
-The installed CLI acceptance currently proves a synthetic text request and selector rejection; richer write/history/cancellation scenarios are exercised through the real SDK tests, not every installed CLI entry point. For changes to CLI parsing, stdin, session flags or output, add and drive the affected CLI path before claiming it verified. Synthetic text is not evidence of real-model reasoning or useful generated code. Shared filesystem access is not profile confidentiality. Never break a normal user's lock or delete their history to make a test pass.
+The installed CLI acceptance currently proves a synthetic text request and selector rejection; richer write/history/cancellation scenarios are exercised through the real SDK tests, not every installed CLI entry point. For changes to CLI parsing, stdin, session flags or output, add and drive the affected CLI path before claiming it verified. Synthetic text is not evidence of real-model reasoning or useful generated code. Shared filesystem access is not profile confidentiality. A minimal `SOUL.md`-only profile needs the operator's `shared/` configuration for model/tool defaults; the sandbox does not seed one yet, so its acceptance still uses version-1 definitions. Never break a normal user's lock or delete their history to make a test pass.

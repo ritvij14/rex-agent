@@ -1,4 +1,9 @@
 const messages = {
+  UNSUPPORTED_PROFILE_VERSION: "Profile definition version is not supported.",
+  INVALID_SHARED_CONFIGURATION: "Shared profile configuration is invalid.",
+  SHARED_CONFIGURATION_UNAVAILABLE:
+    "Shared profile configuration is unavailable.",
+  PROFILE_INCOMPLETE: "Profile configuration is incomplete.",
   INVALID_PROFILES_ROOT: "An absolute profiles root is required.",
   INVALID_PROFILE_ID: "A valid explicit profile ID is required.",
   PROFILE_UNAVAILABLE: "The selected profile is unavailable.",

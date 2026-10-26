@@ -11,8 +11,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   isToolAllowed,
+  loadSharedConfiguration,
   parseProfileRequest,
+  ProfileError,
   ProfileRuntime,
+  resolveEffectiveProfile,
+  type SharedConfiguration,
 } from "@rex/profiles";
 import { createProposal } from "./proposals.ts";
 import { requireRunnable, TOOL_NAMES } from "./policy.ts";
@@ -66,11 +70,26 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
     ? AbortSignal.any([options.signal, controller.signal])
     : controller.signal;
   const runtime = new ProfileRuntime(options.profilesRoot);
+  let shared: SharedConfiguration | undefined;
+  try {
+    shared = await loadSharedConfiguration(
+      join(options.profilesRoot.trim(), "shared"),
+    );
+  } catch (error) {
+    if (
+      !(error instanceof ProfileError) ||
+      error.code !== "SHARED_CONFIGURATION_UNAVAILABLE"
+    ) {
+      throw error;
+    }
+  }
   return runtime.run(
     request.profileId,
     async () => {
       const profile = runtime.current();
-      const config = requireRunnable(profile);
+      const config = requireRunnable(
+        resolveEffectiveProfile(profile, shared).configuration,
+      );
       const state = join(options.stateRoot.trim(), profile.id);
       await mkdir(state, { recursive: true, mode: 0o700 });
       const lockPath = join(state, "turn.lock");

@@ -1,5 +1,10 @@
 import { ProfileError } from "./errors.ts";
 
+export interface ModelReference {
+  readonly provider: string;
+  readonly id: string;
+}
+
 export interface ToolPolicy {
   readonly whitelist: readonly string[];
   readonly blacklist: readonly string[];
@@ -7,13 +12,28 @@ export interface ToolPolicy {
 
 export interface ProfileConfiguration {
   readonly instructions: string;
-  readonly model: { readonly provider: string; readonly id: string };
+  readonly model: ModelReference;
   readonly tools: ToolPolicy;
 }
 
+export type ProfileVersion = 2;
+
 export interface ProfileDefinition {
   readonly id: string;
+  readonly version?: ProfileVersion;
   readonly configuration?: ProfileConfiguration;
+  readonly model?: ModelReference;
+  readonly tools?: ToolPolicy;
+}
+
+export interface SharedConfiguration {
+  readonly version: ProfileVersion;
+  readonly soul?: string;
+  readonly model?: ModelReference;
+  readonly tools?: ToolPolicy;
+  readonly mandatory?: {
+    readonly tools?: { readonly blacklist: readonly string[] };
+  };
 }
 
 export function validateProfileId(id: unknown): asserts id is string {
@@ -21,6 +41,7 @@ export function validateProfileId(id: unknown): asserts id is string {
     typeof id !== "string" ||
     id.length > 64 ||
     id !== id.trim() ||
+    id === "shared" ||
     !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(id)
   ) {
     throw new ProfileError("INVALID_PROFILE_ID");
@@ -54,11 +75,55 @@ function rules(value: unknown): value is string[] {
   );
 }
 
-export function parseProfileDefinition(value: unknown): ProfileDefinition {
+function toolPolicy(value: unknown): ToolPolicy {
   if (
-    !objectWithKeys(value, ["id"]) &&
-    !objectWithKeys(value, ["id", "configuration"])
+    !objectWithKeys(value, ["whitelist", "blacklist"]) ||
+    !rules(value.whitelist) ||
+    !rules(value.blacklist)
   ) {
+    throw new ProfileError("INVALID_PROFILE_DEFINITION");
+  }
+  return Object.freeze({
+    whitelist: Object.freeze([...value.whitelist]),
+    blacklist: Object.freeze([...value.blacklist]),
+  });
+}
+
+function modelReference(value: unknown): ModelReference {
+  if (
+    !objectWithKeys(value, ["provider", "id"]) ||
+    typeof value.provider !== "string" ||
+    !/^[a-z][a-z0-9-]{0,63}$/.test(value.provider) ||
+    typeof value.id !== "string" ||
+    value.id !== value.id.trim() ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(value.id)
+  ) {
+    throw new ProfileError("INVALID_PROFILE_DEFINITION");
+  }
+  return Object.freeze({ provider: value.provider, id: value.id });
+}
+
+const legacyConfiguration = (value: unknown): ProfileConfiguration => {
+  if (
+    !objectWithKeys(value, ["instructions", "model", "tools"]) ||
+    typeof value.instructions !== "string" ||
+    !value.instructions.trim() ||
+    value.instructions.length > 2000
+  ) {
+    throw new ProfileError("INVALID_PROFILE_DEFINITION");
+  }
+  return Object.freeze({
+    instructions: value.instructions,
+    model: modelReference(value.model),
+    tools: toolPolicy(value.tools),
+  });
+};
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+export function parseProfileDefinition(value: unknown): ProfileDefinition {
+  if (!isPlainObject(value) || !Object.hasOwn(value, "id")) {
     throw new ProfileError("INVALID_PROFILE_DEFINITION");
   }
   try {
@@ -66,40 +131,149 @@ export function parseProfileDefinition(value: unknown): ProfileDefinition {
   } catch {
     throw new ProfileError("INVALID_PROFILE_DEFINITION");
   }
-  if (!Object.hasOwn(value, "configuration"))
-    return Object.freeze({ id: value.id });
-  const config = value.configuration;
+  if (Object.hasOwn(value, "version")) {
+    if (value.version !== 2) {
+      throw new ProfileError("UNSUPPORTED_PROFILE_VERSION");
+    }
+    const keys = Object.keys(value);
+    if (
+      keys.length > 4 ||
+      keys.some(
+        (key) =>
+          !(
+            key === "id" ||
+            key === "version" ||
+            key === "model" ||
+            key === "tools"
+          ),
+      )
+    ) {
+      throw new ProfileError("INVALID_PROFILE_DEFINITION");
+    }
+    const parsed: {
+      id: string;
+      version: ProfileVersion;
+      model?: ModelReference;
+      tools?: ToolPolicy;
+    } = { id: value.id as string, version: 2 };
+    if (Object.hasOwn(value, "model"))
+      parsed.model = modelReference(value.model);
+    if (Object.hasOwn(value, "tools")) parsed.tools = toolPolicy(value.tools);
+    return Object.freeze(parsed);
+  }
+  if (Object.keys(value).length === 1) return Object.freeze({ id: value.id });
   if (
-    !objectWithKeys(config, ["instructions", "model", "tools"]) ||
-    typeof config.instructions !== "string" ||
-    !config.instructions.trim() ||
-    config.instructions.length > 2000 ||
-    !objectWithKeys(config.model, ["provider", "id"]) ||
-    typeof config.model.provider !== "string" ||
-    !/^[a-z][a-z0-9-]{0,63}$/.test(config.model.provider) ||
-    typeof config.model.id !== "string" ||
-    config.model.id !== config.model.id.trim() ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(config.model.id) ||
-    !objectWithKeys(config.tools, ["whitelist", "blacklist"]) ||
-    !rules(config.tools.whitelist) ||
-    !rules(config.tools.blacklist)
+    Object.keys(value).length !== 2 ||
+    !Object.hasOwn(value, "configuration")
   ) {
     throw new ProfileError("INVALID_PROFILE_DEFINITION");
   }
-  return Object.freeze({
-    id: value.id,
-    configuration: Object.freeze({
-      instructions: config.instructions,
-      model: Object.freeze({
-        provider: config.model.provider,
-        id: config.model.id,
-      }),
+  const config = legacyConfiguration(value.configuration);
+  return Object.freeze({ id: value.id, configuration: config });
+}
+
+export function parseSharedConfiguration(value: unknown): SharedConfiguration {
+  if (!isPlainObject(value) || value.version !== 2) {
+    throw new ProfileError("INVALID_SHARED_CONFIGURATION");
+  }
+  const keys = Object.keys(value);
+  if (
+    keys.length > 4 ||
+    keys.some(
+      (key) =>
+        !(
+          key === "version" ||
+          key === "model" ||
+          key === "tools" ||
+          key === "mandatory"
+        ),
+    )
+  ) {
+    throw new ProfileError("INVALID_SHARED_CONFIGURATION");
+  }
+  const parsed: {
+    version: ProfileVersion;
+    model?: ModelReference;
+    tools?: ToolPolicy;
+    mandatory?: { tools?: { blacklist: readonly string[] } };
+  } = { version: 2 };
+  try {
+    if (Object.hasOwn(value, "model"))
+      parsed.model = modelReference(value.model);
+    if (Object.hasOwn(value, "tools")) parsed.tools = toolPolicy(value.tools);
+  } catch {
+    throw new ProfileError("INVALID_SHARED_CONFIGURATION");
+  }
+  if (Object.hasOwn(value, "mandatory")) {
+    const mandatory = isPlainObject(value.mandatory)
+      ? value.mandatory
+      : undefined;
+    const tools =
+      mandatory &&
+      Object.keys(mandatory).length === 1 &&
+      Object.hasOwn(mandatory, "tools")
+        ? mandatory.tools
+        : undefined;
+    const blacklist =
+      isPlainObject(tools) &&
+      Object.keys(tools).length === 1 &&
+      Object.hasOwn(tools, "blacklist")
+        ? tools.blacklist
+        : undefined;
+    if (!rules(blacklist)) {
+      throw new ProfileError("INVALID_SHARED_CONFIGURATION");
+    }
+    parsed.mandatory = Object.freeze({
       tools: Object.freeze({
-        whitelist: Object.freeze([...config.tools.whitelist]),
-        blacklist: Object.freeze([...config.tools.blacklist]),
+        blacklist: Object.freeze([...blacklist]),
       }),
-    }),
-  });
+    });
+  }
+  return Object.freeze(parsed);
+}
+
+export function resolveEffectiveProfile(
+  profile: {
+    readonly id: string;
+    readonly home: string;
+    readonly soul?: string;
+    readonly configuration?: ProfileConfiguration;
+    readonly model?: ModelReference;
+    readonly tools?: ToolPolicy;
+  },
+  shared?: SharedConfiguration,
+) {
+  if (profile.configuration) {
+    return Object.freeze({ ...profile, configuration: profile.configuration });
+  }
+  if (profile.soul) {
+    const model = profile.model ?? shared?.model;
+    if (!model) throw new ProfileError("PROFILE_INCOMPLETE");
+    const instructions = shared?.soul
+      ? `${shared.soul}\n\n${profile.soul}`
+      : profile.soul;
+    const blacklist = [
+      ...(profile.tools?.blacklist ?? []),
+      ...(shared?.tools?.blacklist ?? []),
+      ...(shared?.mandatory?.tools?.blacklist ?? []),
+    ];
+    return Object.freeze({
+      id: profile.id,
+      home: profile.home,
+      soul: profile.soul,
+      configuration: Object.freeze({
+        instructions,
+        model,
+        tools: Object.freeze({
+          whitelist: Object.freeze([
+            ...(profile.tools?.whitelist ?? shared?.tools?.whitelist ?? []),
+          ]),
+          blacklist: Object.freeze([...new Set(blacklist)]),
+        }),
+      }),
+    });
+  }
+  throw new ProfileError("PROFILE_INCOMPLETE");
 }
 
 export function isToolAllowed(policy: ToolPolicy, name: string): boolean {
