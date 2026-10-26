@@ -12,6 +12,8 @@ The production upstream is the existing Mac CLI Proxy API, reached through Docke
 
 `profile-admin` is an operator-only, on-demand helper under the Compose `operator` profile. It runs as UID/GID 0 with no network, host mounts, inference socket, credentials, capabilities or privilege escalation; its only volumes are writable active definitions and read-only drafts. It does not start with the normal services. Approval requires an explicit operator command, matching canonical SHA-256 digest and unused profile ID; it cannot overwrite a profile. Agent runs cannot write `/profiles` or invoke this helper through Docker. This protects active definitions, not all files between profiles: tools remain UID 1000, and an allowed `bash` can read/write the shared workspace/state.
 
+The root and terminal manifests scope an exact `undici` 8.12.2 override to Pi Coding Agent 1.3.0. Regenerate each lockfile with npm, not hand edits; `tests/dependencies.test.ts` checks the locks and host resolution, and container acceptance checks the installed external copy. This is a partial SDK dependency mitigation: Pi's published CLI embeds a separate copy that npm overrides do not replace. Keep that limitation visible until a reviewed Pi release fixes its bundle; see [dependency mitigation](../../docs/features/repository-safeguards.md#external-pi-http-dependency).
+
 ## Commands
 
 Run from the repository root:

@@ -13,7 +13,7 @@ Node 22, locked local dependencies, scanner setup and a running Docker engine ar
 
 ## Expected observations
 
-Installed Pi and Rex run as intended; writable synthetic files are visible on a second read. Root/package/definition paths reject writes. Containers have no host bind mounts, published ports, capabilities or privilege escalation. Direct networking and management access remain denied. Stopping the test gateway produces the expected failure; restarting it recovers. Persistent files survive sandbox recreation, while temporary files do not. Resetting only the newly created test volumes removes synthetic persistent state.
+Installed Pi and Rex run as intended; the container resolves Pi's external undici dependency to 8.12.2 while retaining Pi 1.3.0. This version check does not inspect or fix the separate implementation embedded in the Pi CLI bundle. Writable synthetic files are visible on a second read. Root/package/definition paths reject writes. Containers have no host bind mounts, published ports, capabilities or privilege escalation. Direct networking and management access remain denied. Stopping the test gateway produces the expected failure; restarting it recovers. Persistent files survive sandbox recreation, while temporary files do not. Resetting only the newly created test volumes removes synthetic persistent state.
 
 The command's final cleanup removes its own containers and volumes. The outer verification runner retains logs and the source-fingerprinted report outside those containers. Confirm both cleanup and retained evidence; a successful final message alone is not proof of the changed boundary.
 

@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
+import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { networkInterfaces } from "node:os";
 
@@ -41,6 +42,10 @@ async function socketRequest(path: string, method = "GET") {
 }
 
 async function main() {
+  const piRequire = createRequire(
+    "/opt/rex/node_modules/@earendil-works/pi-coding-agent/package.json",
+  );
+  assert.equal(piRequire("undici/package.json").version, "8.12.2");
   assert.equal(process.getuid?.(), 1000);
   assert.deepEqual(Object.keys(networkInterfaces()), ["lo"]);
   const status = readFileSync("/proc/self/status", "utf8");

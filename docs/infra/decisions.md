@@ -173,3 +173,13 @@
 **Security impact:** vulnerability alerts remain enabled independently of version-update scheduling; this change does not alter repository security settings, workflow permissions or scanning. Ignored versions may constrain automated security fixes, so alerts still require review. No dependency is updated or automatically merged by this policy.
 
 **Verification:** static configuration regressions check both ecosystems' wildcard minor/patch exclusions without excluding all majors, both npm lockfile directories and the runtime-aligned Node-types exception. GitHub's actual scheduling and PR generation require the configuration on the default branch; local checks do not prove service execution.
+
+## 018: Patch external undici without upgrading Pi or claiming a bundled CLI fix
+
+**Decision:** retain Pi Coding Agent 1.3.0 and override only its external undici dependency to exact version 8.12.2 in the root and terminal installs. Regenerate both lockfiles using npm and verify actual installed resolution, not just override declarations.
+
+**Reason:** Pi pins vulnerable undici 8.10.2 exactly; the checked latest Pi 1.4.0 also retains that pin. Candidate 8.12.2 passed synthetic HTTP/proxy/stream/upload/cancellation checks and the existing SDK integration suite before adoption. A narrow override avoids an unrelated Pi upgrade.
+
+**Security impact:** the external dependency is patched, but the separately embedded implementation in Pi's published CLI is unchanged. Do not equate cleared dependency alerts with a fully patched CLI. No TLS checks, network restrictions, credentials, scanner rules or profile permissions are relaxed. The changed NO_PROXY wildcard semantics require attention in deployments that explicitly use them; no private host configuration is imported or changed.
+
+**Verification and revisit:** regressions fail on the previous lockfiles/host install and check the fixed external version in both locks and actual host/container resolution while retaining Pi 1.3.0. Run full synthetic container acceptance before installation. Revisit the override when the Pi maintainers release a patched and rebuilt distribution; any removal or replacement requires the same installed-interface checks.

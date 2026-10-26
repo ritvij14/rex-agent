@@ -40,6 +40,14 @@ The root npm package is private; it is not published by this setup. Dependabot p
 
 Scanners cannot understand all personal context, screenshots, account names, encrypted or disguised secrets, or unknown formats. The optional local term file is not in CI. Hooks can be disabled, and CI runs after upload. Human review and actual GitHub rules remain required. Full-history scans favor safety over speed; optimize only after measurement, retaining old-commit and metadata coverage.
 
+## External Pi HTTP dependency
+
+The root workspace and terminal sandbox keep Pi Coding Agent at 1.3.0 and scope an npm override to its external `undici` dependency, selecting exact version 8.12.2 instead of the published 8.10.2 pin. npm owns both regenerated lockfiles. This addresses the external dependency versions affected by GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472; it is not evidence that every advisory was reachable through Rex.
+
+Pi's published `dist/bundle` CLI contains a separate embedded implementation. An override does not rebuild that code, so a clean dependency audit is not a complete Pi CLI security fix. Keep the limitation until a reviewed maintainer release fixes and rebuilds the CLI. Do not downgrade or force-upgrade Pi just to clear audit findings. Undici 8.12.2 also changes `NO_PROXY=*.example.com` to match subdomains only, not `example.com` itself; deployments relying on the old matching must adjust their explicit proxy configuration.
+
+Run `node --import tsx --test tests/dependencies.test.ts` after installing the root lockfile: it checks both locks retain Pi 1.3.0, contain only external undici 8.12.2 copies, and that the host Pi dependency actually resolves to that version. `npm run verify -- full` also checks the external version inside a freshly built disposable container and exercises installed Pi/Rex with synthetic inference, including tool/session/admission and interruption/recovery cases. It does not refresh the normal running sandbox or prove live-provider compatibility.
+
 ## Verification
 
 Run `npm ci` and `npm run setup` before `npm test`. Pinned `tsx` executes TypeScript tests with Node's built-in runner, without emitting JavaScript files. Tests create disposable Git repositories with invented identities and data. They cover clean text, denied paths, index/worktree differences, forced staging, ignored tracked files, symlink escapes, private historical content, commit metadata, and a generated secret-shaped token. Additional tests cover checksum rejection, scanner version validation, preserving other hooks, invalid CLI arguments, and sanitized command errors. CLI entry detection resolves real paths so symlinked launch paths cannot silently skip checks. No account login, provider call, or paid model is involved.
