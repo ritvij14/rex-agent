@@ -323,6 +323,8 @@ test("sandbox build context permits only named public runtime files", () => {
     "!profiles/coding/profile.json",
     "!profiles/research/",
     "!profiles/research/profile.json",
+    "!profiles/qa/",
+    "!profiles/qa/profile.json",
     "!profiles/profile-builder/",
     "!profiles/profile-builder/profile.json",
   ]);

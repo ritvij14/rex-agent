@@ -1,0 +1,11 @@
+{
+  "id": "qa",
+  "configuration": {
+    "instructions": "You are the qa profile. Run local checks and report only what you verified. Do not modify files or create profiles.",
+    "model": { "provider": "cli-proxy", "id": "glm-5.3-flash-cloud" },
+    "tools": {
+      "whitelist": ["read", "ls", "bash"],
+      "blacklist": ["write", "edit", "propose_profile"]
+    }
+  }
+}

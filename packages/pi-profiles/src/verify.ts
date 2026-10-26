@@ -238,8 +238,9 @@ async function main() {
   }
   if (mode === "worker") {
     assert.ok(
-      (profile === "coding" || profile === "research") &&
-        (action === "prepare" || action === "verify" || action === "check"),
+      ((profile === "coding" || profile === "research") &&
+        (action === "prepare" || action === "verify" || action === "check")) ||
+        (profile === "qa" && action === "verify"),
     );
     await workerMode(profile, action);
     console.log(`PASS: worker isolation probes for ${profile} (${action}).`);

@@ -102,6 +102,20 @@ async function main() {
             args: { path: "/profiles/coding/profile.json" },
             failed: true,
           },
+          "synthetic-qa-isolation": {
+            name: "bash",
+            args: {
+              command: `node -e "const a=require('node:assert/strict'),f=require('node:fs');a.deepEqual(f.readdirSync('/profiles').sort(),['qa','shared']);a.throws(()=>f.readFileSync('/profiles/coding/profile.json'));a.equal(f.existsSync('/var/run/docker.sock'),false);"`,
+            },
+          },
+          "synthetic-qa-denied-write": {
+            name: "write",
+            args: {
+              path: "/workspace/qa-must-not-write.txt",
+              content: "synthetic",
+            },
+            failed: true,
+          },
           "synthetic-create-profile": {
             name: "propose_profile",
             args: {

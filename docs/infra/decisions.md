@@ -237,3 +237,11 @@
 **Compatibility:** generic definitions seed new master volumes once, never overwrite existing ones. Old shared histories/workspace/drafts are not mounted, copied or deleted by worker execution. Compose stop/reset do not remove dynamic profile volumes. Installing the boundary in an existing normal sandbox and migrating old state remain separately approved operations. Docker/kernel exploits, operator-driven data sharing and resource denial-of-service against shared infrastructure are outside this boundary. No memory engine or live-provider compatibility is implied.
 
 **Verification:** core regression failed before shared policy applied to legacy profiles; the installed shared-baseline CLI regression failed with status 0 before rejection was added. Disposable acceptance drives the real Pi CLI/tool loop for coding writes, shell/read cross-profile denials, minimal SOUL/shared configuration, truncation/recovery, private persistence, concurrent workers, reserved container-name contention and actual builder-to-operator approval, including forged update provenance rejection. It inspects worker mounts, process/network modes and resource limits. Node/CommonJS startup and entrypoint handling are exercised by the installed image, not inferred from host typechecking.
+
+## 024: Add a qa template without replacing the existing roster
+
+**Decision:** keep `coding`, `research`, and `profile-builder`. Add `qa` as a fourth public template. It may read, list, and run shell checks. It may not use `write`, `edit`, or `propose_profile`. Its instruction is one short fixture sentence, not a persona to author. Adding the file does not refresh or migrate an existing normal sandbox volume.
+
+**Reason:** the owner wants the existing writer and reader to stay, and wants one more profile that can run checks while the package is tested. Profile text for real use comes later, from the owner.
+
+**Verification:** the shipped-profile adapter test failed with a missing `qa` file before the template existed. Disposable acceptance runs `qa`, rejects its write tool, and checks that its shell sees only its own configuration snapshot.

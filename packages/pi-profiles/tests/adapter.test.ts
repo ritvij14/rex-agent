@@ -41,7 +41,7 @@ async function fixture(t: TestContext) {
   const cwd = join(root, "workspace");
   for (const path of [profilesRoot, stateRoot, proposalsRoot, cwd])
     await mkdir(path);
-  for (const id of ["coding", "research", "profile-builder"]) {
+  for (const id of ["coding", "research", "qa", "profile-builder"]) {
     await mkdir(join(profilesRoot, id));
     const content = await readFile(
       new URL(
@@ -132,9 +132,9 @@ function draft(id = "synthetic-helper") {
   };
 }
 
-test("all three profiles load their role, fixed GLM model and permitted tools", async (t) => {
+test("shipped profiles load their role, fixed GLM model and permitted tools", async (t) => {
   const f = await fixture(t);
-  for (const id of ["coding", "research", "profile-builder"]) {
+  for (const id of ["coding", "research", "qa", "profile-builder"]) {
     const result = await f.run(id);
     assert.equal(result.profileId, id);
     assert.equal(result.model, "glm-5.3-flash-cloud");
@@ -145,6 +145,7 @@ test("all three profiles load their role, fixed GLM model and permitted tools", 
     const tools = request.tools?.map((tool) => tool.function.name) ?? [];
     assert.deepEqual(tools.sort(), [...result.toolNames].sort());
     assert.equal(tools.includes("write"), id === "coding");
+    assert.equal(tools.includes("bash"), id === "coding" || id === "qa");
     assert.equal(tools.includes("propose_profile"), id === "profile-builder");
     assert.equal(tools.includes("codemode"), false);
   }

@@ -14,6 +14,7 @@ const VERIFY = "/opt/rex/packages/pi-profiles/src/verify.ts";
 const profiles = [
   "coding",
   "research",
+  "qa",
   "profile-builder",
   "soul-check",
   "synthetic-helper",
@@ -92,7 +93,13 @@ export function checkProfileAcceptance(project: string) {
     1,
     "a coding draft claiming builder origin must not enter builder intake",
   );
-  for (const id of ["coding", "research", "profile-builder", "soul-check"]) {
+  for (const id of [
+    "coding",
+    "research",
+    "qa",
+    "profile-builder",
+    "soul-check",
+  ]) {
     const answer = run(id, "synthetic-cap-free-response", true);
     requireSuccess(answer);
     assert.match(answer.stdout, new RegExp(`profile=${id} model=`));
@@ -100,6 +107,9 @@ export function checkProfileAcceptance(project: string) {
   requireSuccess(run("coding", "synthetic-write-marker"));
   requireSuccess(run("coding", "synthetic-shell-isolation"));
   requireSuccess(run("research", "synthetic-read-foreign"));
+  requireSuccess(run("qa", "synthetic-qa-isolation"));
+  requireSuccess(run("qa", "synthetic-qa-denied-write"));
+  probe("qa", "verify");
   probe("coding", "check");
   const truncated = run("research", "synthetic-truncated-response", true);
   assert.equal(truncated.status, 1);
