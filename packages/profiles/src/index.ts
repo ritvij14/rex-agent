@@ -177,7 +177,7 @@ export async function loadSharedConfiguration(
     }
     let soul: string | undefined;
     try {
-      soul = await readBounded(join(home, "SOUL.md"), SOUL_LIMIT);
+      soul = await readBounded(join(home, "REX_SOUL.md"), SOUL_LIMIT);
     } catch (error) {
       if (error instanceof ProfileError) {
         throw new ProfileError("INVALID_SHARED_CONFIGURATION");

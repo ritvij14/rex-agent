@@ -460,7 +460,7 @@ test("a minimal SOUL-only profile runs with shared defaults", async (t) => {
     }),
   );
   await writeFile(
-    join(f.profilesRoot, "shared", "SOUL.md"),
+    join(f.profilesRoot, "shared", "REX_SOUL.md"),
     "Shared synthetic persona.",
   );
   await mkdir(join(f.profilesRoot, "minimal"));

@@ -38,7 +38,7 @@ async function fixture(
     }),
   );
   await writeFile(
-    join(root, "shared", "SOUL.md"),
+    join(root, "shared", "REX_SOUL.md"),
     "Shared persona: answer from local evidence.",
   );
   await mkdir(join(root, "minimal"));
