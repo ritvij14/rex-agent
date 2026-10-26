@@ -7,6 +7,7 @@ This map covers implemented user behavior only. Use the affected entries for a c
 | [Profiles and sessions](profiles-and-sessions.md) | Select a role explicitly, perform allowed work and resume the right conversation | Core/SDK tests; installed CLI synthetic acceptance |
 | [Profile drafts](profile-drafts.md) | Propose a profile without granting it authority; require operator admission | SDK proposal/admission tests; isolated operator helper acceptance |
 | [Terminal sandbox](terminal-sandbox.md) | Work without host/account access and recover without losing persistent state | Gateway tests; real disposable Docker boundary/recovery checks |
+| [Dependency proposals](../../../../docs/features/repository-safeguards.md#ci-and-remaining-limits) | Receive major-only version PRs while keeping exact pins and Node-runtime-aligned types | `node --import tsx --test tests/dependabot.test.ts`; static configuration only, GitHub scheduling unverified locally |
 
 Start with `npm run verify -- doctor`. `npm run verify -- full` records source checks and all existing synthetic container acceptance. The feature entries identify narrower commands and gaps; choosing one does not verify the others.
 

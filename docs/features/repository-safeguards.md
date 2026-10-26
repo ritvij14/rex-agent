@@ -36,13 +36,15 @@ Missing tooling, an execution error, or any finding fails the check. Raw scanner
 
 The workflow fetches full history, uses pinned action commits, disables checkout credential persistence, runs locked npm installs without lifecycle scripts, and has read-only repository access. It never uploads scan reports, logs, build artifacts, or runtime data. Do not add jobs that run untrusted PR code with privileged tokens.
 
-The root npm package is private; it is not published by this setup. Dependabot proposes updates but cannot approve them. No automatic agent hooks or Claude-specific session processes are copied from the template.
+The root npm package is private; it is not published by this setup. Dependabot proposes updates but cannot approve them. Its weekly version-update checks cover the root npm workspace, the terminal sandbox's separate lockfile, and GitHub Actions. Wildcard ignore rules suppress minor and patch version PRs; major updates remain proposals requiring review. An explicit exception ignores `@types/node` versions 23 and above while the runtime remains Node 22. Keep exact manifest pins, lockfiles and action commit pins; minor/patch upgrades are deliberate responses to a bug or security need, not automatic range refreshes. These rules do not disable repository vulnerability alerts; ignored versions can also constrain automated security fixes, so review security alerts independently. No automatic agent hooks or Claude-specific session processes are copied from the template.
 
 Scanners cannot understand all personal context, screenshots, account names, encrypted or disguised secrets, or unknown formats. The optional local term file is not in CI. Hooks can be disabled, and CI runs after upload. Human review and actual GitHub rules remain required. Full-history scans favor safety over speed; optimize only after measurement, retaining old-commit and metadata coverage.
 
 ## Verification
 
 Run `npm ci` and `npm run setup` before `npm test`. Pinned `tsx` executes TypeScript tests with Node's built-in runner, without emitting JavaScript files. Tests create disposable Git repositories with invented identities and data. They cover clean text, denied paths, index/worktree differences, forced staging, ignored tracked files, symlink escapes, private historical content, commit metadata, and a generated secret-shaped token. Additional tests cover checksum rejection, scanner version validation, preserving other hooks, invalid CLI arguments, and sanitized command errors. CLI entry detection resolves real paths so symlinked launch paths cannot silently skip checks. No account login, provider call, or paid model is involved.
+
+`tests/dependabot.test.ts` checks the declared wildcard minor/patch exclusions, continued major eligibility, both npm lockfile directories, and the Node-types runtime exception. These are static configuration checks, not a local execution of GitHub's Dependabot service.
 
 Instruction-placement tests keep one public root README and require a local `AGENTS.md` whenever a workspace manifest is added. Whether a deeper non-package directory has genuinely distinct rules remains a review decision under the root placement policy; no test can infer that from folder names alone.
 
