@@ -163,3 +163,13 @@
 **Security impact:** only email classification changes in message context. The full unmodified message still reaches Gitleaks; credentials, personal home paths, long account/chat-like numbers, local private phrases, size and encoding checks remain active. No refs are excluded or deleted, no secret patterns are relaxed, and no hooks or CI protections are bypassed.
 
 **Verification:** real installed-hook and history tests accept ordinary emails and bot trailers while rejecting secrets and other private content in email-containing messages. Default file checks still reject non-example emails. Fetch the previously unseen remote proposal refs and scan their complete history before relying on local release results; rerun PR CI before merging.
+
+## 017: Major-only dependency proposals with exact pins
+
+**Decision:** keep exact dependency versions, committed lockfiles and action commit pins. Configure weekly Dependabot version-update PRs for major changes only across the root npm workspace, terminal sandbox and GitHub Actions. Ignore Node type versions 23 and above until the Node 22 runtime is deliberately upgraded.
+
+**Reason:** avoid routine minor/patch update noise and unnecessary churn in a working system. Take smaller upgrades when a concrete bug or security issue warrants them. Closing one unsuitable PR is not a lasting version policy.
+
+**Security impact:** vulnerability alerts remain enabled independently of version-update scheduling; this change does not alter repository security settings, workflow permissions or scanning. Ignored versions may constrain automated security fixes, so alerts still require review. No dependency is updated or automatically merged by this policy.
+
+**Verification:** static configuration regressions check both ecosystems' wildcard minor/patch exclusions without excluding all majors, both npm lockfile directories and the runtime-aligned Node-types exception. GitHub's actual scheduling and PR generation require the configuration on the default branch; local checks do not prove service execution.
