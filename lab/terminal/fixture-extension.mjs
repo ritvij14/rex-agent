@@ -8,10 +8,23 @@ export default function (pi) {
     description: "Exercise an explicitly installed synthetic extension.",
     parameters: {
       type: "object",
-      properties: { nested: { type: "boolean" } },
+      properties: {
+        nested: { type: "boolean" },
+        target: { type: "string", minLength: 1 },
+        arguments: { type: "object", additionalProperties: true },
+      },
       additionalProperties: false,
     },
     async execute(_id, params, signal, _update, ctx) {
+      if (params.target) {
+        const result = await ctx.executeTool(
+          params.target,
+          params.arguments ?? {},
+          { signal },
+        );
+        if (result.isError) throw new Error("Nested tool denied or failed.");
+        return result.result;
+      }
       if (params.nested) {
         const result = await ctx.executeTool(
           "write",

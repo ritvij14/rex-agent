@@ -6,6 +6,8 @@
 
 The command requires the first line `profile: <id>`, followed by a nonempty task. There is no natural-language guessing or default profile. Model fallback is limited to explicitly configured pre-response temporary failures. The Jev router, memory engine and Pi Durable are not implemented. MCP supports explicitly selected direct local tools and authorized resource calls; indirect discovery and remote transport are not enabled. The existing Pi TUI remains an unprofiled baseline; `rex` is the profile-selected interface.
 
+Installed extension wrappers using Pi's public `ctx.executeTool` share the same tool policy and selected MCP server scope. A wrapper cannot grant a denied MCP mutation or read an unselected server's resource. This nested-call contract is distinct from enabling Codemode or deferred discovery, which remain unsupported.
+
 ## Shared configuration and minimal SOUL profiles
 
 A profiles root may contain an operator-owned `shared/` directory. `shared` is a reserved profile ID. The directory holds an optional `REX_SOUL.md` persona applied to both legacy and version-2 profiles and a required `configuration.json` with `{ "version": 2, ... }` and any of `model`, `tools`, and `mandatory.tools.blacklist`. Model and tool rules follow the same validation as profile definitions. Anything the shared directory misparses fails closed with `INVALID_SHARED_CONFIGURATION`; a missing root fails with `SHARED_CONFIGURATION_UNAVAILABLE`.

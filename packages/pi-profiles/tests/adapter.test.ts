@@ -1523,6 +1523,106 @@ async function assertMcpStopped(cwd: string) {
   );
 }
 
+test("nested MCP calls preserve tool policy and selected resource scope", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const f = await mcpFixture(t, "nested", true);
+  const installedExtensionsRoot = join(f.cwd, "operator-extensions");
+  await mkdir(installedExtensionsRoot);
+  const code = await readFile(
+    new URL("../../../lab/terminal/fixture-extension.mjs", import.meta.url),
+  );
+  await writeFile(join(installedExtensionsRoot, "fixture.mjs"), code);
+  await writeFile(
+    f.sharedPath,
+    JSON.stringify({
+      ...f.shared,
+      extensionCatalog: [
+        {
+          id: "fixture",
+          sha256: createHash("sha256").update(code).digest("hex"),
+          tools: ["fixture_probe"],
+        },
+      ],
+    }),
+  );
+  f.definition.configuration.resources.extensions = ["fixture"];
+  f.definition.configuration.tools.whitelist.push("fixture_probe");
+  await writeFile(f.manifest, JSON.stringify(f.definition));
+  const options = { ...f.options, installedExtensionsRoot };
+  const invoke = async (target: string, args = {}) => {
+    f.replies.push(
+      { tool: "fixture_probe", args: { target, arguments: args } },
+      { text: "finished" },
+    );
+    const result = await runProfileRequest(options);
+    await assertMcpStopped(f.cwd);
+    return JSON.parse(
+      f.received
+        .at(-1)!
+        .messages.findLast((message) => message.role === "tool")!
+        .content as string,
+    );
+  };
+  const inspected = await invoke("mcp__fixture__inspect");
+  assert.equal(inspected.privateHome, true);
+  assert.equal(
+    await readFile(join(f.cwd, "mcp-marker.txt"), "utf8"),
+    "executed",
+  );
+  f.replies.push(
+    {
+      tool: "fixture_probe",
+      args: { target: "mcp__fixture__mutate", arguments: {} },
+    },
+    { text: "denied" },
+  );
+  const denied = await runProfileRequest(options);
+  const records = await readFile(denied.sessionFile!, "utf8");
+  assert.ok(records.includes("Nested tool denied"));
+  await assert.rejects(readFile(join(f.cwd, "mcp-forbidden.txt")));
+  await assertMcpStopped(f.cwd);
+  f.replies.push(
+    {
+      tool: "fixture_probe",
+      args: {
+        target: "read_mcp_resource",
+        arguments: { server: "fixture", uri: "fixture://own/evidence" },
+      },
+    },
+    { text: "read" },
+  );
+  await writeFile(join(f.cwd, "mcp-evidence.md"), "NESTED_RESOURCE_EVIDENCE");
+  await runProfileRequest(options);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "NESTED_RESOURCE_EVIDENCE",
+    ),
+  );
+  assert.ok(!JSON.stringify(f.received).includes("MCP_META_MUST_STAY_PRIVATE"));
+  f.replies.push(
+    {
+      tool: "fixture_probe",
+      args: {
+        target: "read_mcp_resource",
+        arguments: { server: "unselected", uri: "fixture://own/evidence" },
+      },
+    },
+    { text: "denied" },
+  );
+  const unselected = await runProfileRequest(options);
+  assert.ok(
+    (await readFile(unselected.sessionFile!, "utf8")).includes(
+      "Nested tool denied",
+    ),
+  );
+  assert.equal(
+    await readFile(join(f.cwd, "mcp-resource-calls.txt"), "utf8"),
+    "read;",
+  );
+  assert.equal(await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"), "called");
+  await assertMcpStopped(f.cwd);
+});
+
 test("selected local MCP tools use private process settings and retain policy", async (t) => {
   const f = await mcpFixture(t);
   f.replies.push(

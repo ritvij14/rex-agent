@@ -171,6 +171,33 @@ async function main() {
             name: "read_mcp_resource",
             args: { server: "fixture", uri: "fixture://own/evidence" },
           },
+          "synthetic-mcp-nested-inspect": {
+            name: "fixture_probe",
+            args: { target: "mcp__fixture__inspect", arguments: {} },
+          },
+          "synthetic-mcp-nested-denied": {
+            name: "fixture_probe",
+            args: { target: "mcp__fixture__mutate", arguments: {} },
+            failed: true,
+          },
+          "synthetic-mcp-nested-resource-read": {
+            name: "fixture_probe",
+            args: {
+              target: "read_mcp_resource",
+              arguments: { server: "fixture", uri: "fixture://own/evidence" },
+            },
+          },
+          "synthetic-mcp-nested-unselected": {
+            name: "fixture_probe",
+            args: {
+              target: "read_mcp_resource",
+              arguments: {
+                server: "unselected",
+                uri: "fixture://own/evidence",
+              },
+            },
+            failed: true,
+          },
           "synthetic-mcp-inspect": { name: "mcp__fixture__inspect", args: {} },
           "synthetic-mcp-denied": {
             name: "mcp__fixture__mutate",
@@ -257,7 +284,11 @@ async function main() {
           res.end('{"error":"support reference loading mismatch"}');
           return;
         }
-        if (text.includes("synthetic-mcp-inspect") && called) {
+        if (
+          (text.includes("synthetic-mcp-inspect") ||
+            text.includes("synthetic-mcp-nested-inspect")) &&
+          called
+        ) {
           const observed = JSON.parse(
             typeof last?.content === "string" ? last.content : "{}",
           );
@@ -273,13 +304,19 @@ async function main() {
             return;
           }
         }
-        if (text.includes("synthetic-mcp-resource") && called) {
+        if (
+          (text.includes("synthetic-mcp-resource") ||
+            text.includes("synthetic-mcp-nested-resource-read")) &&
+          called
+        ) {
           const result = JSON.stringify(last?.content);
-          const expected = text.includes("synthetic-mcp-resource-read")
-            ? "INSTALLED_RESOURCE_EVIDENCE"
-            : text.includes("synthetic-mcp-resource-templates")
-              ? "fixture://own/{name}"
-              : "fixture://own/evidence";
+          const expected =
+            text.includes("synthetic-mcp-resource-read") ||
+            text.includes("synthetic-mcp-nested-resource-read")
+              ? "INSTALLED_RESOURCE_EVIDENCE"
+              : text.includes("synthetic-mcp-resource-templates")
+                ? "fixture://own/{name}"
+                : "fixture://own/evidence";
           if (
             !result.includes(expected) ||
             requestText.includes("MCP_META_MUST_STAY_PRIVATE")
