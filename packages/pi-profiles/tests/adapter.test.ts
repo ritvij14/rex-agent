@@ -1105,6 +1105,8 @@ test("only selected skills are advertised lazily and selected templates expand",
   await mkdir(join(home, "resources", "skills", "review"), { recursive: true });
   await mkdir(join(home, "resources", "prompts"), { recursive: true });
   const skillPath = join(home, "resources", "skills", "review", "SKILL.md");
+  const supportPath = join(home, "resources", "skills", "review", "support.md");
+  await writeFile(supportPath, "SUPPORT_BODY_ONLY_AFTER_READ");
   await writeFile(
     skillPath,
     "---\nname: review\ndescription: Review synthetic evidence when asked.\n---\nSKILL_BODY_ONLY_AFTER_READ\n",
@@ -1123,12 +1125,14 @@ test("only selected skills are advertised lazily and selected templates expand",
   definition.configuration.resources = {
     skills: ["resources/skills/review/SKILL.md"],
     prompts: ["resources/prompts/review.md"],
+    references: ["resources/skills/review/support.md"],
   };
   await writeFile(path, JSON.stringify(definition));
   await f.run("research", "Advertise capabilities", true);
   const first = JSON.stringify(f.received.at(-1)!.messages);
   assert.ok(first.includes("Review synthetic evidence when asked."));
   assert.ok(!first.includes("SKILL_BODY_ONLY_AFTER_READ"));
+  assert.ok(!first.includes("SUPPORT_BODY_ONLY_AFTER_READ"));
   assert.ok(!first.includes("STRAY_SKILL_MUST_NOT_LOAD"));
   f.replies.push(
     { tool: "read", args: { path: skillPath } },
@@ -1138,6 +1142,16 @@ test("only selected skills are advertised lazily and selected templates expand",
   assert.ok(
     JSON.stringify(f.received.at(-1)!.messages).includes(
       "SKILL_BODY_ONLY_AFTER_READ",
+    ),
+  );
+  f.replies.push(
+    { tool: "read", args: { path: supportPath } },
+    { text: "read support" },
+  );
+  await f.run("research", "Read selected support", true);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "SUPPORT_BODY_ONLY_AFTER_READ",
     ),
   );
   await f.run("research", "/review correctness", true);

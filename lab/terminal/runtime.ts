@@ -168,6 +168,12 @@ async function main() {
             args: { nested: true },
             failed: true,
           },
+          "synthetic-skill-reference": {
+            name: "read",
+            args: {
+              path: "/profiles/soul-check/resources/skills/review/support.md",
+            },
+          },
           "synthetic-skill-use": {
             name: "read",
             args: {
@@ -222,6 +228,15 @@ async function main() {
         ) {
           res.writeHead(400);
           res.end('{"error":"skill loading mismatch"}');
+          return;
+        }
+        if (
+          text.includes("synthetic-skill-reference") &&
+          requestText.includes("REFERENCE_BODY_AFTER_LOADING") !==
+            Boolean(called)
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"support reference loading mismatch"}');
           return;
         }
         const invoke = task && !called;

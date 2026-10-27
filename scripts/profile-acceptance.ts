@@ -73,7 +73,7 @@ export function checkProfileAcceptance(project: string) {
      f.writeFileSync('/profiles/shared/REX_SOUL.md','Common synthetic instructions.');
      f.mkdirSync('/profiles/extension-check'); f.writeFileSync('/profiles/extension-check/SOUL.md','Synthetic extension acceptance.'); f.writeFileSync('/profiles/extension-check/profile.json',JSON.stringify({version:2,id:'extension-check',resources:{extensions:['fixture']},tools:{whitelist:['read','ls','fixture_probe'],blacklist:['write','edit','bash','propose_profile']}}));
      f.mkdirSync('/profiles/limits-check'); f.writeFileSync('/profiles/limits-check/SOUL.md','Limited synthetic profile.'); f.writeFileSync('/profiles/limits-check/profile.json',JSON.stringify({version:2,id:'limits-check',limits:{maxRequests:1}}));
-     f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.'); f.mkdirSync('/profiles/soul-check/resources'); f.writeFileSync('/profiles/soul-check/resources/own.md','Own resource instruction.'); f.writeFileSync('/profiles/soul-check/resources/ignored.md','Ignored resource text.'); f.mkdirSync('/profiles/soul-check/resources/skills/review',{recursive:true}); f.writeFileSync('/profiles/soul-check/resources/skills/review/SKILL.md','---\\nname: review\\ndescription: Selected synthetic skill description.\\n---\\nSKILL_BODY_AFTER_LOADING'); f.mkdirSync('/profiles/soul-check/resources/prompts'); f.writeFileSync('/profiles/soul-check/resources/prompts/review.md','synthetic-template $1'); f.writeFileSync('/profiles/soul-check/profile.json',JSON.stringify({version:2,id:'soul-check',resources:{workspaceInstructions:['AGENTS.md'],instructions:['resources/own.md'],skills:['resources/skills/review/SKILL.md'],prompts:['resources/prompts/review.md']}}));`,
+     f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.'); f.mkdirSync('/profiles/soul-check/resources'); f.writeFileSync('/profiles/soul-check/resources/own.md','Own resource instruction.'); f.writeFileSync('/profiles/soul-check/resources/ignored.md','Ignored resource text.'); f.mkdirSync('/profiles/soul-check/resources/skills/review',{recursive:true}); f.writeFileSync('/profiles/soul-check/resources/skills/review/SKILL.md','---\\nname: review\\ndescription: Selected synthetic skill description.\\n---\\nSKILL_BODY_AFTER_LOADING'); f.writeFileSync('/profiles/soul-check/resources/skills/review/support.md','REFERENCE_BODY_AFTER_LOADING'); f.mkdirSync('/profiles/soul-check/resources/prompts'); f.writeFileSync('/profiles/soul-check/resources/prompts/review.md','synthetic-template $1'); f.writeFileSync('/profiles/soul-check/profile.json',JSON.stringify({version:2,id:'soul-check',resources:{workspaceInstructions:['AGENTS.md'],instructions:['resources/own.md'],skills:['resources/skills/review/SKILL.md'],prompts:['resources/prompts/review.md'],references:['resources/skills/review/support.md']}}));`,
   ]);
   requireSuccess(seed);
   const run = (
@@ -150,6 +150,7 @@ export function checkProfileAcceptance(project: string) {
     1,
   );
   requireSuccess(run("soul-check", "synthetic-skill-use", true));
+  requireSuccess(run("soul-check", "synthetic-skill-reference", true));
   assert.match(
     requireSuccess(run("soul-check", "/review correctness", true)),
     /synthetic-template-ok/,

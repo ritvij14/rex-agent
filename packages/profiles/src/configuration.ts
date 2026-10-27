@@ -45,6 +45,7 @@ export interface ResourceConfiguration {
   readonly instructions?: readonly string[];
   readonly skills?: readonly string[];
   readonly prompts?: readonly string[];
+  readonly references?: readonly string[];
   readonly workspaceInstructions?: readonly string[];
   readonly extensions?: readonly string[];
 }
@@ -56,6 +57,7 @@ export function resourcePaths(
     ...(resources?.instructions ?? []),
     ...(resources?.skills ?? []),
     ...(resources?.prompts ?? []),
+    ...(resources?.references ?? []),
   ];
 }
 
@@ -71,6 +73,7 @@ export function parseResourceConfiguration(
           "instructions",
           "skills",
           "prompts",
+          "references",
           "workspaceInstructions",
           "extensions",
         ].includes(key),
@@ -81,6 +84,7 @@ export function parseResourceConfiguration(
     instructions?: readonly string[];
     skills?: readonly string[];
     prompts?: readonly string[];
+    references?: readonly string[];
     workspaceInstructions?: readonly string[];
     extensions?: readonly string[];
   } = {};
@@ -105,6 +109,7 @@ export function parseResourceConfiguration(
     "instructions",
     "skills",
     "prompts",
+    "references",
     "workspaceInstructions",
   ] as const) {
     if (!Object.hasOwn(value, key)) continue;

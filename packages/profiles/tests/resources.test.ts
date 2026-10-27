@@ -121,3 +121,55 @@ test("workspace instruction opt-in never traverses or follows links", async (t) 
     );
   }
 });
+
+test("selected support references are bounded, frozen and never eager instructions", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "rex-support-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const home = join(root, "coding");
+  await mkdir(join(home, "resources"), { recursive: true });
+  await writeFile(join(home, "SOUL.md"), "Synthetic persona.");
+  await writeFile(join(home, "resources", "support.md"), "LAZY_SUPPORT_ONLY");
+  await writeFile(
+    join(home, "profile.json"),
+    JSON.stringify({
+      version: 2,
+      id: "coding",
+      model: { provider: "cli-proxy", id: "synthetic-model" },
+      resources: { references: ["resources/support.md"] },
+    }),
+  );
+  const profile = await profiles.lookupProfile(root, "coding");
+  assert.deepEqual(profile.resourceFiles, [
+    { path: "resources/support.md", text: "LAZY_SUPPORT_ONLY" },
+  ]);
+  assert.ok(Object.isFrozen(profile.resourceFiles));
+  assert.ok(Object.isFrozen(profile.resourceFiles![0]));
+  assert.ok(
+    !profiles
+      .resolveEffectiveProfile(profile)
+      .configuration!.instructions.includes("LAZY_SUPPORT_ONLY"),
+  );
+  for (const resources of [
+    { references: ["../outside.md"] },
+    { references: ["resources/helper.mjs"] },
+    {
+      references: ["resources/support.md"],
+      instructions: ["resources/support.md"],
+    },
+    {
+      references: Array.from({ length: 8 }, (_, i) => `resources/ref-${i}.md`),
+      skills: ["resources/review/SKILL.md"],
+    },
+  ])
+    assert.throws(() =>
+      profiles.parseProfileDefinition({ version: 2, id: "coding", resources }),
+    );
+  await rm(join(home, "resources", "support.md"));
+  await symlink(join(home, "SOUL.md"), join(home, "resources", "support.md"));
+  await assert.rejects(
+    profiles.lookupProfile(root, "coding"),
+    (error) =>
+      error instanceof profiles.ProfileError &&
+      error.code === "PROFILE_UNAVAILABLE",
+  );
+});

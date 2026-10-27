@@ -72,7 +72,7 @@ test("provisioning copies only selected validated config and shared policy", asy
     JSON.stringify({
       version: 2,
       id: "coding",
-      resources: { instructions: ["resources/own.md"] },
+      resources: { references: ["resources/own.md"] },
     }),
   );
   await provisionProfile(source, target, "coding");

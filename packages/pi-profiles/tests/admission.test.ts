@@ -444,3 +444,46 @@ test("update approval cannot add an operator catalog custom tool", async (t) => 
     ["read"],
   );
 });
+
+test("lazy support references bind approval and survive activation", async (t) => {
+  const f = await fixture(t);
+  await seedShared(f.profilesRoot);
+  const proposal = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    {
+      version: 2,
+      id: "support-helper",
+      resources: { references: ["resources/support.md"] },
+    },
+    CREATE,
+    "Synthetic persona.",
+    [{ path: "resources/support.md", text: "Original support." }],
+  );
+  await writeFile(
+    join(f.proposalsRoot, "support-helper", "resources", "support.md"),
+    "Changed support.",
+  );
+  const reviewed = await reviewProposal(f.proposalsRoot, "support-helper");
+  assert.notEqual(reviewed.digest, proposal.digest);
+  await assert.rejects(
+    approveProposal(
+      f.profilesRoot,
+      f.proposalsRoot,
+      "support-helper",
+      proposal.digest,
+    ),
+    /digest/i,
+  );
+  await assert.rejects(lookupProfile(f.profilesRoot, "support-helper"));
+  await approveProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    "support-helper",
+    reviewed.digest,
+  );
+  assert.deepEqual(
+    (await lookupProfile(f.profilesRoot, "support-helper")).resourceFiles,
+    [{ path: "resources/support.md", text: "Changed support." }],
+  );
+});

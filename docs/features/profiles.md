@@ -14,7 +14,7 @@ The minimal runnable profile is one file: `<profiles-root>/<id>/SOUL.md` (a regu
 
 `resolveEffectiveProfile(profile, shared)` produces the frozen effective `{ instructions, model, tools }`: shared `REX_SOUL.md` and profile `SOUL.md` are concatenated (`shared + "\n\n" + own`), the model resolves profile-override-first, and tool policy resolves as above. Resolution fails with `PROFILE_INCOMPLETE` when no model can be determined or when a legacy `{ "id" }`-only profile is resolved. Instructions remain literal text, never executable resources, and permission enforcement stays outside the model; `SOUL.md` cannot grant tools.
 
-Version 2 definitions reject inline `instructions` together with `SOUL.md` (contradictory sources are invalid) and any field outside `id`/`version`/`model`/`tools`/`limits`/`resources`. A version field other than 2 fails with `UNSUPPORTED_PROFILE_VERSION`. Resource files remain future units. Model references may include overrides, ordered fallbacks, and thinking settings as described below.
+Version 2 definitions reject inline `instructions` together with `SOUL.md` (contradictory sources are invalid) and any field outside `id`/`version`/`model`/`tools`/`limits`/`resources`. A version field other than 2 fails with `UNSUPPORTED_PROFILE_VERSION`. Explicit resource files follow the digest and snapshot rules below. Model references may include overrides, ordered fallbacks, and thinking settings as described below.
 
 ## Operator model catalog
 
@@ -34,7 +34,9 @@ All attempts share one profile lock, deadline, request budget, and tool policy. 
 
 ## Selected skills and templates
 
-`resources` may contain `instructions`, `skills`, and `prompts` path arrays; the combined maximum is eight unique Markdown files per shared/profile bundle. Skill paths end in `/SKILL.md`. Skills need valid name/description frontmatter. Shared skills and prompts are always included; same-name metadata collisions fail before inference rather than silently shadowing a shared entry. Malformed metadata and skills without an allowed read tool also fail closed.
+`resources` may contain `instructions`, `skills`, `prompts`, and `references` path arrays; the combined maximum is eight unique Markdown files per shared/profile bundle. Skill paths end in `/SKILL.md`. Skills need valid name/description frontmatter. Shared skills and prompts are always included; same-name metadata collisions fail before inference rather than silently shadowing a shared entry. Malformed metadata and skills without an allowed read tool also fail closed.
+
+`resources.references` selects supporting Markdown files (for example `resources/skills/review/support.md`) without advertising them or inserting their contents into the system prompt. A selected skill can refer to a sibling support file; the model must read it explicitly. References obey the same combined file/count/byte limits, exact path checks, approval digests and snapshot-copy rules. Unselected siblings are never copied to worker definitions. This does not enable executable skill scripts.
 
 Only selected skills are advertised by description; their bodies stay out of context until the read tool or explicit `/skill:name` invocation loads them. Only selected prompts become `/name` commands with Pi argument expansion. Skills, prompt files and their bytes are included in the same resource digest/snapshot rules as instructions. The adapter passes explicit skill paths with includeDefaults false and explicit template paths while default discovery stays off. No host/project skills, templates, packages or executable helpers are discovered. Skill text and allowed-tools frontmatter cannot grant tool authority; the execution policy still blocks denied calls.
 
