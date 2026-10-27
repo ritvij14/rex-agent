@@ -4,9 +4,15 @@
 
 `@rex/profiles` provides validated profile lookup, immutable per-turn asynchronous scope, a versioned configuration schema with `SOUL.md` persona files, shared operator defaults, prompt-selector parsing and pure tool-policy evaluation. It uses Node built-ins only. `@rex/pi-profiles` separately connects that contract to Pi 1.3.0 through a one-request SDK command in the terminal sandbox.
 
-The command requires the first line `profile: <id>`, followed by a nonempty task. There is no natural-language guessing or default profile. Model fallback is limited to explicitly configured pre-response temporary failures. The Jev router, memory engine and Pi Durable are not implemented. MCP supports explicitly selected direct local tools and authorized resource calls; indirect discovery and remote transport are not enabled. The existing Pi TUI remains an unprofiled baseline; `rex` is the profile-selected interface.
+The command requires the first line `profile: <id>`, followed by a nonempty task. There is no natural-language guessing or default profile. Model fallback is limited to explicitly configured pre-response temporary failures. The Jev router, memory engine and Pi Durable are not implemented. MCP supports explicitly selected direct local tools, authorized resource calls and opt-in Codemode dispatch; deferred exposure and remote transport are not enabled. The existing Pi TUI remains an unprofiled baseline; `rex` is the profile-selected interface.
 
-Installed extension wrappers using Pi's public `ctx.executeTool` share the same tool policy and selected MCP server scope. A wrapper cannot grant a denied MCP mutation or read an unselected server's resource. This nested-call contract is distinct from enabling Codemode or deferred discovery, which remain unsupported.
+Installed extension wrappers using Pi's public `ctx.executeTool` share the same tool policy and selected MCP server scope. A wrapper cannot grant a denied MCP mutation or read an unselected server's resource. Opt-in Codemode uses the same nested-call contract; deferred exposure remains unsupported.
+
+## Built-in Codemode
+
+Set `resources.codemode: true` in a version-2 profile (`configuration.resources` for legacy profiles), and allow `codemode` through the normal whitelist/blacklist rules. Both selection and permission are required; neither a wildcard alone nor task text enables it. Shared `resources.codemode: true` is a required shared selection, so an own false value cannot remove it, but tool denial still wins. The boolean participates in bundle/shared digests, snapshots and maintenance preservation; update approval cannot add Codemode to a profile that did not already select it, even under wildcard grants.
+
+The adapter registers Pi's public Codemode extension with `models:false`. Scripts can call only available policy-allowed tools; they have no Node/process APIs, direct filesystem/network access or separate classifier/image-model API. Existing tool grants still determine effects, and the plain SDK is not filesystem isolation. The total turn deadline also stops busy scripts; completed tool effects are not rolled back. Codemode's own store remains in the selected session history and is subject to the existing history admission bound. No host configuration or MCP endpoint discovery is enabled, and normal profiles are not opted in automatically.
 
 ## Shared configuration and minimal SOUL profiles
 

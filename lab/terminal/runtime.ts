@@ -159,6 +159,29 @@ async function main() {
             },
             failed: true,
           },
+          "synthetic-codemode-allowed": {
+            name: "codemode",
+            args: {
+              code: "text('ENV_SAFE_'+typeof models+'_'+typeof process);text(await tools.mcp__fixture__inspect({}));text(await tools.read_mcp_resource({server:'fixture',uri:'fixture://own/evidence'}));",
+            },
+          },
+          "synthetic-codemode-mutation": {
+            name: "codemode",
+            args: { code: "await tools.mcp__fixture__mutate({})" },
+            failed: true,
+          },
+          "synthetic-codemode-unselected": {
+            name: "codemode",
+            args: {
+              code: "await tools.read_mcp_resource({server:'unselected',uri:'fixture://own/evidence'})",
+            },
+            failed: true,
+          },
+          "synthetic-codemode-disabled": {
+            name: "codemode",
+            args: { code: "text('SHOULD_NOT_EXECUTE')" },
+            failed: true,
+          },
           "synthetic-mcp-resource-list": {
             name: "list_mcp_resources",
             args: { server: "fixture" },
@@ -325,6 +348,17 @@ async function main() {
             res.end('{"error":"MCP resource outcome mismatch"}');
             return;
           }
+        }
+        if (
+          text.includes("synthetic-codemode-allowed") &&
+          called &&
+          (!String(last?.content).includes("INSTALLED_RESOURCE_EVIDENCE") ||
+            !String(last?.content).includes("ENV_SAFE_undefined_undefined") ||
+            requestText.includes("MCP_META_MUST_STAY_PRIVATE"))
+        ) {
+          res.writeHead(400);
+          res.end('{"error":"Codemode output mismatch"}');
+          return;
         }
         const invoke = task && !called;
         res.setHeader("content-type", "text/event-stream");

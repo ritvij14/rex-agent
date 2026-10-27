@@ -8,6 +8,53 @@ const entry = () => ({
   tools: ["read-file"],
 });
 
+test("Codemode is an explicit frozen boolean resource selection, not a file or grant", () => {
+  const shared = profiles.parseSharedConfiguration({
+    version: 2,
+    model: { provider: "cli-proxy", id: "synthetic-model" },
+    resources: { codemode: true },
+    tools: { whitelist: [], blacklist: [] },
+  });
+  const profile = {
+    id: "coding",
+    home: "",
+    soul: "Synthetic persona.",
+    resources: { codemode: false },
+  };
+  const effective = profiles.resolveEffectiveProfile(profile, shared);
+  assert.equal(effective.codemode, true);
+  assert.deepEqual(effective.configuration.tools.whitelist, []);
+  assert.deepEqual(profiles.resourcePaths(shared.resources), []);
+  assert.ok(Object.isFrozen(shared.resources));
+  assert.equal(
+    profiles.resolveEffectiveProfile(profile, {
+      ...shared,
+      resources: undefined,
+    }).codemode,
+    undefined,
+  );
+  assert.equal(
+    profiles.parseProfileDefinition({
+      version: 2,
+      id: "coding",
+      resources: { codemode: true },
+    }).resources?.codemode,
+    true,
+  );
+  for (const value of ["true", 1, null, [], {}, undefined])
+    assert.throws(
+      () =>
+        profiles.parseProfileDefinition({
+          version: 2,
+          id: "coding",
+          resources: { codemode: value },
+        }),
+      (error) =>
+        error instanceof profiles.ProfileError &&
+        error.code === "INVALID_PROFILE_DEFINITION",
+    );
+});
+
 test("MCP resolution unions required shared selections and rejects unknown IDs", () => {
   const shared = profiles.parseSharedConfiguration({
     version: 2,

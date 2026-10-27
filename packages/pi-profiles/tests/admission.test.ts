@@ -59,6 +59,57 @@ async function seedShared(profilesRoot: string) {
   );
 }
 
+test("Codemode opt-in survives creation but cannot be added by wildcard maintenance", async (t) => {
+  const f = await fixture(t);
+  const active = {
+    ...v1Draft("helper"),
+    configuration: {
+      ...v1Draft("helper").configuration,
+      tools: { whitelist: ["*"], blacklist: [] },
+    },
+  };
+  await writeFile(
+    join(f.profilesRoot, "helper", "profile.json"),
+    JSON.stringify(active),
+  );
+  const draft = {
+    ...active,
+    configuration: { ...active.configuration, resources: { codemode: true } },
+  };
+  const update = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    draft,
+    UPDATE("helper"),
+  );
+  await assert.rejects(
+    approveProposal(f.profilesRoot, f.proposalsRoot, "helper", update.digest),
+    /cannot enable Codemode/,
+  );
+  assert.equal(
+    (await lookupProfile(f.profilesRoot, "helper")).configuration?.resources
+      ?.codemode,
+    undefined,
+  );
+  const created = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    { ...draft, id: "script-helper" },
+    CREATE,
+  );
+  await approveProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    "script-helper",
+    created.digest,
+  );
+  assert.equal(
+    (await lookupProfile(f.profilesRoot, "script-helper")).configuration
+      ?.resources?.codemode,
+    true,
+  );
+});
+
 test("create approval is digest-bound and records trusted provenance", async (t) => {
   const f = await fixture(t);
   const proposal = await createProposal(

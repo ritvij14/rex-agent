@@ -1523,6 +1523,147 @@ async function assertMcpStopped(cwd: string) {
   );
 }
 
+test("built-in Codemode requires opt-in and preserves MCP permissions", async (t) => {
+  const f = await mcpFixture(t, "codemode", true);
+  f.definition.configuration.resources.codemode = true;
+  f.definition.configuration.tools.whitelist.push("codemode");
+  await writeFile(f.manifest, JSON.stringify(f.definition));
+  await writeFile(join(f.cwd, "mcp-evidence.md"), "CODEMODE_RESOURCE_EVIDENCE");
+  f.replies.push(
+    {
+      tool: "codemode",
+      args: {
+        code: `text('ENV_SAFE_'+typeof models+'_'+typeof process); if (ALL_TOOLS.some(t=>t.name==='mcp__fixture__mutate')) throw Error('Denied tool advertised'); text(await tools.mcp__fixture__inspect({})); text(await tools.read_mcp_resource({server:'fixture',uri:'fixture://own/evidence'})); try { await tools.mcp__fixture__mutate({}); } catch { text('MUTATION_DENIED'); } try { await tools.read_mcp_resource({server:'unselected',uri:'fixture://own/evidence'}); } catch { text('SERVER_DENIED'); }`,
+      },
+    },
+    { text: "finished" },
+  );
+  const result = await runProfileRequest(f.options);
+  const messages = JSON.stringify(f.received.at(-1)!.messages);
+  assert.ok(messages.includes("CODEMODE_RESOURCE_EVIDENCE"));
+  assert.ok(messages.includes("MUTATION_DENIED"));
+  assert.ok(messages.includes("SERVER_DENIED"));
+  assert.ok(!messages.includes("MCP_META_MUST_STAY_PRIVATE"));
+  const observed = f.received
+    .at(-1)!
+    .messages.findLast((message) => message.role === "tool")!.content as string;
+  assert.ok(observed.includes("ENV_SAFE_undefined_undefined"));
+  assert.ok(
+    (await readFile(result.sessionFile!, "utf8")).includes(
+      "CODEMODE_RESOURCE_EVIDENCE",
+    ),
+  );
+  assert.equal(await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"), "called");
+  assert.equal(
+    await readFile(join(f.cwd, "mcp-resource-calls.txt"), "utf8"),
+    "read;",
+  );
+  await assert.rejects(readFile(join(f.cwd, "mcp-forbidden.txt")));
+  await assertMcpStopped(f.cwd);
+  for (const denied of ["opt-out", "blacklist", "no-grant"]) {
+    f.definition.configuration.resources.codemode = denied !== "opt-out";
+    f.definition.configuration.tools.blacklist = [
+      "mcp__fixture__mutate",
+      ...(denied === "blacklist" ? ["codemode"] : []),
+    ];
+    f.definition.configuration.tools.whitelist =
+      denied === "no-grant" ? ["read"] : ["codemode"];
+    await writeFile(f.manifest, JSON.stringify(f.definition));
+    f.replies.push(
+      {
+        tool: "codemode",
+        args: { code: "await tools.mcp__fixture__inspect({})" },
+      },
+      { text: "denied" },
+    );
+    const result = await runProfileRequest(f.options);
+    assert.ok(!result.toolNames.includes("codemode"));
+    assert.equal(
+      await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"),
+      "called",
+    );
+    await assertMcpStopped(f.cwd);
+  }
+});
+
+test("Codemode deadline stops a busy VM and permits a fresh turn", async (t) => {
+  const f = await mcpFixture(t);
+  f.definition.configuration.resources.codemode = true;
+  f.definition.configuration.tools.whitelist.push("codemode");
+  f.definition.configuration.limits = { deadlineMs: 1000 };
+  await writeFile(f.manifest, JSON.stringify(f.definition));
+  f.replies.push({ tool: "codemode", args: { code: "for (;;) {}" } });
+  await assert.rejects(runProfileRequest(f.options), /deadline/);
+  assert.equal(f.received.length, 1);
+  await assertMcpStopped(f.cwd);
+  f.replies.push(
+    { tool: "codemode", args: { code: "text('RECOVERED')" } },
+    { text: "recovered" },
+  );
+  assert.equal((await runProfileRequest(f.options)).output, "recovered");
+  assert.ok(
+    (
+      f.received
+        .at(-1)!
+        .messages.findLast((message) => message.role === "tool")!
+        .content as string
+    ).includes("RECOVERED"),
+  );
+  await assertMcpStopped(f.cwd);
+});
+
+test("Codemode store resumes only its own profile and commits only successful scripts", async (t) => {
+  const f = await fixture(t);
+  for (const id of ["coding", "research"]) {
+    const path = join(f.profilesRoot, id, "profile.json");
+    const definition = JSON.parse(await readFile(path, "utf8"));
+    definition.configuration.resources = { codemode: true };
+    definition.configuration.tools = { whitelist: ["codemode"], blacklist: [] };
+    await writeFile(path, JSON.stringify(definition));
+  }
+  const script = async (profile: string, code: string, fresh = false) => {
+    f.replies.push({ tool: "codemode", args: { code } }, { text: "finished" });
+    await f.run(profile, "Run the script", fresh);
+    return f.received
+      .at(-1)!
+      .messages.findLast((message) => message.role === "tool")!
+      .content as string;
+  };
+  assert.ok(
+    (
+      await script(
+        "coding",
+        "store('scope','SCRIPT_STATE_ALPHA');text('stored');",
+        true,
+      )
+    ).includes("Script completed"),
+  );
+  assert.ok(
+    (
+      await script(
+        "research",
+        "text(load('scope') ?? 'NO_SCRIPT_STATE');",
+        true,
+      )
+    ).includes("NO_SCRIPT_STATE"),
+  );
+  assert.ok(
+    !JSON.stringify(f.received.at(-1)!.messages).includes("SCRIPT_STATE_ALPHA"),
+  );
+  assert.ok(
+    (
+      await script(
+        "coding",
+        "store('scope','FAILED_SCRIPT_STATE');throw Error('invented failure');",
+      )
+    ).includes("Script failed"),
+  );
+  const resumed = await script("coding", "text(load('scope'));");
+  assert.ok(resumed.includes("Script completed"));
+  assert.ok(resumed.includes("SCRIPT_STATE_ALPHA"));
+  assert.ok(!resumed.includes("FAILED_SCRIPT_STATE"));
+});
+
 test("nested MCP calls preserve tool policy and selected resource scope", async (t) => {
   const { createHash } = await import("node:crypto");
   const f = await mcpFixture(t, "nested", true);

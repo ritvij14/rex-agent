@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { Type } from "typebox";
 import {
   createAgentSession,
+  createCodemodeExtension,
   loadSkills,
   DefaultResourceLoader,
   ModelRuntime,
@@ -196,8 +197,17 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           extensionIds,
           options.installedExtensionsRoot,
         );
+        const builtinFactories = effective.codemode
+          ? [createCodemodeExtension({ models: false })]
+          : [];
+        const registeredExtensions = [
+          ...installed.tools,
+          ...(effective.codemode ? ["codemode"] : []),
+        ];
         const availableNames: readonly string[] = [
-          ...TOOL_NAMES,
+          ...TOOL_NAMES.filter(
+            (name) => name !== "codemode" || effective.codemode,
+          ),
           ...installed.tools,
           ...localMcpToolNames(effective.mcpServers ?? []),
         ];
@@ -446,6 +456,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           appendSystemPrompt: [],
           systemPromptOverride: () => instructions,
           extensionFactories: [
+            ...builtinFactories,
             ...installed.factories,
             (pi) => {
               pi.on("tool_call", (event) => {
@@ -557,8 +568,8 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
             .getExtensions()
             .extensions.flatMap((extension) => [...extension.tools.keys()]);
           if (
-            actualTools.length !== installed.tools.length ||
-            actualTools.some((name) => !installed.tools.includes(name))
+            actualTools.length !== registeredExtensions.length ||
+            actualTools.some((name) => !registeredExtensions.includes(name))
           )
             throw new Error(
               "Installed extension tools do not match the operator catalog.",

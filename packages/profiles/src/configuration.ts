@@ -49,6 +49,7 @@ export interface ResourceConfiguration {
   readonly workspaceInstructions?: readonly string[];
   readonly extensions?: readonly string[];
   readonly mcp?: readonly string[];
+  readonly codemode?: boolean;
 }
 
 export function resourcePaths(
@@ -78,6 +79,7 @@ export function parseResourceConfiguration(
           "workspaceInstructions",
           "extensions",
           "mcp",
+          "codemode",
         ].includes(key),
     )
   )
@@ -90,7 +92,13 @@ export function parseResourceConfiguration(
     workspaceInstructions?: readonly string[];
     extensions?: readonly string[];
     mcp?: readonly string[];
+    codemode?: boolean;
   } = {};
+  if (Object.hasOwn(value, "codemode")) {
+    if (typeof value.codemode !== "boolean")
+      throw new ProfileError("INVALID_PROFILE_DEFINITION");
+    parsed.codemode = value.codemode;
+  }
   for (const key of ["extensions", "mcp"] as const) {
     if (!Object.hasOwn(value, key)) continue;
     const ids = value[key];
@@ -661,6 +669,10 @@ export function resolveEffectiveProfile(
       home: profile.home,
       soul: profile.soul,
       ...(mcpServers.length ? { mcpServers } : {}),
+      ...(shared?.resources?.codemode ||
+      (profile.configuration?.resources ?? profile.resources)?.codemode
+        ? { codemode: true as const }
+        : {}),
       configuration: Object.freeze({
         instructions,
         model,

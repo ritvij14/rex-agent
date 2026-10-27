@@ -382,6 +382,8 @@ export async function approveProposal(
       reviewed.definition,
       sharedConfiguration,
     );
+    if (proposedEffective.codemode && !currentEffective.codemode)
+      throw new Error("A profile revision cannot enable Codemode.");
     if (
       proposedEffective.mcpServers?.some(
         (entry) =>
