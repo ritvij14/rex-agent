@@ -48,6 +48,7 @@ export interface ResourceConfiguration {
   readonly references?: readonly string[];
   readonly workspaceInstructions?: readonly string[];
   readonly extensions?: readonly string[];
+  readonly mcp?: readonly string[];
 }
 
 export function resourcePaths(
@@ -76,6 +77,7 @@ export function parseResourceConfiguration(
           "references",
           "workspaceInstructions",
           "extensions",
+          "mcp",
         ].includes(key),
     )
   )
@@ -87,9 +89,11 @@ export function parseResourceConfiguration(
     references?: readonly string[];
     workspaceInstructions?: readonly string[];
     extensions?: readonly string[];
+    mcp?: readonly string[];
   } = {};
-  if (Object.hasOwn(value, "extensions")) {
-    const ids = value.extensions;
+  for (const key of ["extensions", "mcp"] as const) {
+    if (!Object.hasOwn(value, key)) continue;
+    const ids = value[key];
     if (
       !Array.isArray(ids) ||
       ids.length > 8 ||
@@ -103,7 +107,7 @@ export function parseResourceConfiguration(
       )
     )
       throw new ProfileError("INVALID_PROFILE_DEFINITION");
-    parsed.extensions = Object.freeze([...ids]);
+    parsed[key] = Object.freeze([...ids]);
   }
   for (const key of [
     "instructions",
@@ -223,6 +227,7 @@ export interface SharedConfiguration {
   readonly version: ProfileVersion;
   readonly models?: readonly CatalogModel[];
   readonly extensionCatalog?: readonly ExtensionCatalogEntry[];
+  readonly localMcpCatalog?: readonly LocalMcpServer[];
   readonly resourceFiles?: readonly ResourceFile[];
   readonly soul?: string;
   readonly model?: ModelReference;
@@ -442,11 +447,12 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
   }
   const keys = Object.keys(value);
   if (
-    keys.length > 8 ||
+    keys.length > 9 ||
     keys.some(
       (key) =>
         !(
           key === "extensionCatalog" ||
+          key === "localMcpCatalog" ||
           key === "resources" ||
           key === "limits" ||
           key === "models" ||
@@ -463,6 +469,7 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
     version: ProfileVersion;
     models?: readonly CatalogModel[];
     extensionCatalog?: readonly ExtensionCatalogEntry[];
+    localMcpCatalog?: readonly LocalMcpServer[];
     model?: ModelReference;
     tools?: ToolPolicy;
     limits?: TurnLimits;
@@ -470,6 +477,8 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
     mandatory?: { tools?: { blacklist: readonly string[] } };
   } = { version: 2 };
   try {
+    if (Object.hasOwn(value, "localMcpCatalog"))
+      parsed.localMcpCatalog = parseLocalMcpCatalog(value.localMcpCatalog);
     if (Object.hasOwn(value, "resources"))
       parsed.resources = parseResourceConfiguration(value.resources);
     if (Object.hasOwn(value, "model"))
@@ -520,6 +529,13 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
       }),
     );
   }
+  const mcpNames = localMcpToolNames(parsed.localMcpCatalog ?? []);
+  if (
+    parsed.extensionCatalog?.some((entry) =>
+      entry.tools.some((name) => mcpNames.includes(name)),
+    )
+  )
+    throw new ProfileError("INVALID_SHARED_CONFIGURATION");
   if (Object.hasOwn(value, "models")) {
     const models = value.models;
     if (!Array.isArray(models) || models.length < 1 || models.length > 64)
@@ -631,6 +647,10 @@ export function resolveEffectiveProfile(
     ]
       .filter((text) => text !== undefined)
       .join("\n\n");
+    const mcpServers = selectLocalMcpServers(shared?.localMcpCatalog, [
+      ...(shared?.resources?.mcp ?? []),
+      ...((profile.configuration?.resources ?? profile.resources)?.mcp ?? []),
+    ]);
     const blacklist = [
       ...(tools?.blacklist ?? []),
       ...(shared?.tools?.blacklist ?? []),
@@ -640,6 +660,7 @@ export function resolveEffectiveProfile(
       id: profile.id,
       home: profile.home,
       soul: profile.soul,
+      ...(mcpServers.length ? { mcpServers } : {}),
       configuration: Object.freeze({
         instructions,
         model,
@@ -825,6 +846,21 @@ export function parseLocalMcpCatalog(
       }
       ids.add(parsed.id);
       return parsed;
+    }),
+  );
+}
+
+export function selectLocalMcpServers(
+  catalog: readonly LocalMcpServer[] | undefined,
+  ids: readonly string[],
+) {
+  const selected = [...new Set(ids)];
+  if (selected.length > 8) throw new ProfileError("INVALID_MCP_CATALOG");
+  return Object.freeze(
+    selected.map((id) => {
+      const entry = catalog?.find((entry) => entry.id === id);
+      if (!entry) throw new ProfileError("INVALID_MCP_CATALOG");
+      return entry;
     }),
   );
 }

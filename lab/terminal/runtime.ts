@@ -159,6 +159,12 @@ async function main() {
             },
             failed: true,
           },
+          "synthetic-mcp-inspect": { name: "mcp__fixture__inspect", args: {} },
+          "synthetic-mcp-denied": {
+            name: "mcp__fixture__mutate",
+            args: {},
+            failed: true,
+          },
           "synthetic-extension-call": {
             name: "fixture_probe",
             args: {},
@@ -238,6 +244,22 @@ async function main() {
           res.writeHead(400);
           res.end('{"error":"support reference loading mismatch"}');
           return;
+        }
+        if (text.includes("synthetic-mcp-inspect") && called) {
+          const observed = JSON.parse(
+            typeof last?.content === "string" ? last.content : "{}",
+          );
+          if (
+            observed.keys?.join(",") !== "HOME,LANG,PATH,TMPDIR" ||
+            !observed.privateHome ||
+            !observed.foreignProfileAbsent ||
+            !observed.dockerSocketAbsent ||
+            observed.args?.join(",") !== "synthetic-installed"
+          ) {
+            res.writeHead(400);
+            res.end('{"error":"MCP isolation outcome mismatch"}');
+            return;
+          }
         }
         const invoke = task && !called;
         res.setHeader("content-type", "text/event-stream");

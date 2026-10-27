@@ -8,6 +8,42 @@ const entry = () => ({
   tools: ["read-file"],
 });
 
+test("MCP resolution unions required shared selections and rejects unknown IDs", () => {
+  const shared = profiles.parseSharedConfiguration({
+    version: 2,
+    model: { provider: "cli-proxy", id: "synthetic-model" },
+    localMcpCatalog: [
+      { ...entry(), id: "first" },
+      { ...entry(), id: "second" },
+    ],
+    resources: { mcp: ["first"] },
+  });
+  const profile = {
+    id: "coding",
+    home: "",
+    soul: "Synthetic persona.",
+    resources: { mcp: ["second"] },
+  };
+  assert.deepEqual(
+    profiles
+      .resolveEffectiveProfile(profile, shared)
+      .mcpServers?.map((entry) => entry.id),
+    ["first", "second"],
+  );
+  assert.deepEqual(
+    profiles
+      .resolveEffectiveProfile({ ...profile, resources: { mcp: [] } }, shared)
+      .mcpServers?.map((entry) => entry.id),
+    ["first"],
+  );
+  assert.throws(() =>
+    profiles.resolveEffectiveProfile(
+      { ...profile, resources: { mcp: ["missing"] } },
+      shared,
+    ),
+  );
+});
+
 test("local MCP catalog freezes literal arguments and canonical tool names", () => {
   assert.equal(typeof profiles.parseLocalMcpCatalog, "function");
   const raw = {
@@ -86,11 +122,17 @@ test("local MCP catalog rejects execution, credential, alias and unbounded metad
   assert.throws(() =>
     profiles.parseSharedConfiguration({ version: 2, mcpCatalog: [entry()] }),
   );
-  assert.throws(() =>
+  assert.deepEqual(
     profiles.parseProfileDefinition({
       version: 2,
       id: "coding",
       resources: { mcp: ["local-docs"] },
-    }),
+    }).resources?.mcp,
+    ["local-docs"],
+  );
+  assert.throws(() =>
+    profiles.selectLocalMcpServers(profiles.parseLocalMcpCatalog([entry()]), [
+      "missing",
+    ]),
   );
 });

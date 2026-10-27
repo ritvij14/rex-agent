@@ -27,6 +27,7 @@ export { ProfileError, type ProfileErrorCode } from "./errors.ts";
 export {
   parseLocalMcpCatalog,
   localMcpToolNames,
+  selectLocalMcpServers,
   type LocalMcpServer,
   DEFAULT_TURN_LIMITS,
   validateResourceFiles,

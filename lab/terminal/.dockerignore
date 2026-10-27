@@ -8,6 +8,7 @@
 !verify.ts
 !provision.ts
 !fixture-extension.mjs
+!fixture-mcp.mjs
 !pi.sh
 !profiles/
 !profiles/coding/

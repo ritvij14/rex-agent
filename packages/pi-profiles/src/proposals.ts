@@ -374,12 +374,25 @@ export async function approveProposal(
     }
     const current = await lookupProfile(profiles, id);
     const sharedConfiguration = await readShared(profilesRoot);
-    const currentTools = resolveEffectiveProfile(current, sharedConfiguration)
-      .configuration?.tools;
-    const proposedTools = resolveEffectiveProfile(
+    const currentEffective = resolveEffectiveProfile(
+      current,
+      sharedConfiguration,
+    );
+    const proposedEffective = resolveEffectiveProfile(
       reviewed.definition,
       sharedConfiguration,
-    ).configuration?.tools;
+    );
+    if (
+      proposedEffective.mcpServers?.some(
+        (entry) =>
+          !currentEffective.mcpServers?.some(
+            (current) => current.id === entry.id,
+          ),
+      )
+    )
+      throw new Error("A profile revision cannot add MCP servers.");
+    const currentTools = currentEffective.configuration?.tools;
+    const proposedTools = proposedEffective.configuration?.tools;
     if (
       !currentTools ||
       !proposedTools ||

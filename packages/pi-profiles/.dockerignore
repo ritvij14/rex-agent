@@ -3,6 +3,8 @@
 !src/
 !src/index.ts
 !src/installed-extensions.ts
+!src/installed-modules.ts
+!src/local-mcp.ts
 !src/policy.ts
 !src/proposals.ts
 !src/cli.ts

@@ -37,6 +37,7 @@ async function main() {
     maintain,
     modelOverride,
     installedExtensionsRoot: "/opt/rex/operator-extensions",
+    installedMcpRoot: "/opt/rex/operator-mcp",
   });
   console.log(`[profile=${result.profileId} model=${result.model}]`);
   if (result.attempts.length > 1)

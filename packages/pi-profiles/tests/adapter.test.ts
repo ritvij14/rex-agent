@@ -1448,3 +1448,248 @@ test("fallback never replays lifecycle hooks from installed executable code", as
   assert.equal(f.received.length, 1);
   assert.equal(await readFile(counter, "utf8"), "called");
 });
+
+async function mcpFixture(
+  t: TestContext,
+  mode = "literal ${HOME}; !not-a-command",
+) {
+  const { createHash } = await import("node:crypto");
+  const f = await fixture(t);
+  const installedMcpRoot = join(f.cwd, "operator-mcp");
+  await mkdir(installedMcpRoot);
+  const code = await readFile(
+    new URL("../../../lab/terminal/fixture-mcp.mjs", import.meta.url),
+  );
+  await writeFile(join(installedMcpRoot, "fixture.mjs"), code);
+  await writeFile(
+    join(f.cwd, "mcp-workspace-proof.txt"),
+    "synthetic-own-workspace",
+  );
+  await mkdir(join(f.profilesRoot, "shared"));
+  const sharedPath = join(f.profilesRoot, "shared", "configuration.json");
+  const shared = {
+    version: 2,
+    localMcpCatalog: [
+      {
+        id: "fixture",
+        sha256: createHash("sha256").update(code).digest("hex"),
+        tools: ["inspect", "mutate"],
+        args: [mode],
+      },
+    ],
+  };
+  await writeFile(sharedPath, JSON.stringify(shared));
+  const manifest = join(f.profilesRoot, "research", "profile.json");
+  const definition = JSON.parse(await readFile(manifest, "utf8"));
+  definition.configuration.resources = { mcp: ["fixture"] };
+  definition.configuration.tools.whitelist.push(
+    "mcp__fixture__inspect",
+    "mcp__fixture__mutate",
+  );
+  definition.configuration.tools.blacklist.push("mcp__fixture__mutate");
+  await writeFile(manifest, JSON.stringify(definition));
+  const options = {
+    ...f,
+    installedMcpRoot,
+    input: "profile: research\nUse only the selected local MCP fixture",
+    newSession: true,
+    signal: AbortSignal.timeout(10000),
+  };
+  return {
+    ...f,
+    installedMcpRoot,
+    sharedPath,
+    shared,
+    manifest,
+    definition,
+    options,
+  };
+}
+
+async function assertMcpStopped(cwd: string) {
+  const pid = Number(await readFile(join(cwd, "mcp-pid.txt"), "utf8"));
+  assert.ok(Number.isSafeInteger(pid) && pid > 1);
+  assert.throws(
+    () => process.kill(pid, 0),
+    (error: NodeJS.ErrnoException) => error.code === "ESRCH",
+  );
+}
+
+test("selected local MCP tools use private process settings and retain policy", async (t) => {
+  const f = await mcpFixture(t);
+  f.replies.push(
+    { tool: "mcp__fixture__inspect", args: {} },
+    { text: "inspected" },
+  );
+  const result = await runProfileRequest(f.options);
+  assert.equal(result.output, "inspected");
+  assert.equal(
+    await readFile(join(f.cwd, "mcp-marker.txt"), "utf8"),
+    "executed",
+  );
+  const content = f.received
+    .at(-1)!
+    .messages.find((m) => m.role === "tool")!.content;
+  assert.equal(typeof content, "string");
+  const observed = JSON.parse(content as string);
+  assert.deepEqual(observed.keys, [
+    "HOME",
+    "LANG",
+    "PATH",
+    "TMPDIR",
+    ...(process.platform === "darwin" ? ["__CF_USER_TEXT_ENCODING"] : []),
+  ]);
+  assert.equal(observed.privateHome, true);
+  assert.deepEqual(observed.args, ["literal ${HOME}; !not-a-command"]);
+  await assertMcpStopped(f.cwd);
+  assert.ok(!result.toolNames.includes("mcp__fixture__mutate"));
+  f.replies.push(
+    { tool: "mcp__fixture__mutate", args: {} },
+    { text: "denied" },
+  );
+  const denied = await runProfileRequest(f.options);
+  const records = (await readFile(denied.sessionFile!, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.ok(
+    records.some(
+      (entry) =>
+        entry.message?.role === "toolResult" &&
+        entry.message.toolName === "mcp__fixture__mutate" &&
+        entry.message.isError === true,
+    ),
+  );
+  await assert.rejects(readFile(join(f.cwd, "mcp-forbidden.txt")));
+  await assertMcpStopped(f.cwd);
+});
+
+test("required local MCP startup failure prevents inference and releases the lock", async (t) => {
+  const f = await mcpFixture(t, "fail-startup");
+  await assert.rejects(runProfileRequest(f.options), /Local MCP/);
+  assert.equal(f.received.length, 0);
+  assert.ok(
+    !(await readdir(join(f.stateRoot, "research"))).includes("turn.lock"),
+  );
+  await assertMcpStopped(f.cwd);
+});
+
+test("local MCP refuses missing installation, changed bytes and undeclared tools", async (t) => {
+  const f = await mcpFixture(t);
+  await assert.rejects(
+    runProfileRequest({ ...f.options, installedMcpRoot: undefined }),
+    /Local MCP/,
+  );
+  await assert.rejects(readFile(join(f.cwd, "mcp-pid.txt")));
+  const module = join(f.installedMcpRoot, "fixture.mjs");
+  const code = await readFile(module, "utf8");
+  await writeFile(module, code + "\n// altered synthetic module\n");
+  await assert.rejects(runProfileRequest(f.options), /Local MCP/);
+  await assert.rejects(readFile(join(f.cwd, "mcp-pid.txt")));
+  await writeFile(module, code);
+  f.shared.localMcpCatalog[0]!.tools = ["inspect"];
+  f.definition.configuration.tools.whitelist = [
+    "read",
+    "mcp__fixture__inspect",
+  ];
+  f.definition.configuration.tools.blacklist = [
+    "bash",
+    "write",
+    "edit",
+    "propose_profile",
+  ];
+  await writeFile(f.manifest, JSON.stringify(f.definition));
+  await writeFile(f.sharedPath, JSON.stringify(f.shared));
+  await assert.rejects(runProfileRequest(f.options), /Local MCP/);
+  assert.equal(f.received.length, 0);
+  await assertMcpStopped(f.cwd);
+  await assert.rejects(readFile(join(f.cwd, "mcp-marker.txt")));
+});
+
+test("local MCP deadline closes stalled startup and tool work", async (t) => {
+  for (const mode of ["stall-startup", "hold-tool"]) {
+    const f = await mcpFixture(t, mode);
+    f.definition.configuration.limits = { deadlineMs: 1000 };
+    await writeFile(f.manifest, JSON.stringify(f.definition));
+    if (mode === "hold-tool")
+      f.replies.push({ tool: "mcp__fixture__inspect", args: {} });
+    await assert.rejects(runProfileRequest(f.options), /deadline/);
+    assert.equal(f.received.length, mode === "hold-tool" ? 1 : 0);
+    await assertMcpStopped(f.cwd);
+    assert.ok(
+      !(await readdir(join(f.stateRoot, "research"))).includes("turn.lock"),
+    );
+    assert.ok(
+      !(await readdir(join(f.stateRoot, "research", "agent"))).some((name) =>
+        name.startsWith("mcp-"),
+      ),
+    );
+  }
+});
+
+test("MCP selections survive maintenance, approval and a fresh requested turn", async (t) => {
+  const f = await mcpFixture(t);
+  f.replies.push({
+    tool: "revise_profile",
+    args: { id: "research", instructions: "MCP persona revised." },
+  });
+  await runProfileRequest({ ...f.options, maintain: true });
+  await assertMcpStopped(f.cwd);
+  const draft = await reviewProposal(f.proposalsRoot, "research");
+  assert.deepEqual(draft.definition.configuration?.resources?.mcp, ["fixture"]);
+  await approveProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    "research",
+    draft.digest,
+  );
+  assert.deepEqual(
+    (await lookupProfile(f.profilesRoot, "research")).configuration?.resources
+      ?.mcp,
+    ["fixture"],
+  );
+  await runProfileRequest(f.options);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "MCP persona revised.",
+    ),
+  );
+  assert.ok(
+    f.received
+      .at(-1)!
+      .tools?.some((tool) => tool.function.name === "mcp__fixture__inspect"),
+  );
+  await assertMcpStopped(f.cwd);
+});
+
+test("failed MCP protocol or invalid results stop continuation before another side effect", async (t) => {
+  for (const mode of ["reject-tool", "large-result", "bad-result"]) {
+    const f = await mcpFixture(t, mode);
+    f.replies.push(
+      { tool: "mcp__fixture__inspect", args: {} },
+      { tool: "mcp__fixture__inspect", args: {} },
+    );
+    await assert.rejects(runProfileRequest(f.options));
+    assert.equal(f.received.length, 1);
+    assert.equal(
+      await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"),
+      "called",
+    );
+    await assertMcpStopped(f.cwd);
+  }
+});
+
+test("a dropped local MCP call is never reconnected or replayed", async (t) => {
+  const f = await mcpFixture(t, "crash-tool");
+  f.replies.push({ tool: "mcp__fixture__inspect", args: {} });
+  await assert.rejects(runProfileRequest(f.options));
+  assert.equal(f.received.length, 1);
+  assert.equal(await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"), "called");
+  await assertMcpStopped(f.cwd);
+  f.shared.localMcpCatalog[0]!.args = ["normal"];
+  await writeFile(f.sharedPath, JSON.stringify(f.shared));
+  f.replies.push({ text: "recovered" });
+  assert.equal((await runProfileRequest(f.options)).output, "recovered");
+  await assertMcpStopped(f.cwd);
+  assert.equal(await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"), "called");
+});

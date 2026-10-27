@@ -487,3 +487,44 @@ test("lazy support references bind approval and survive activation", async (t) =
     [{ path: "resources/support.md", text: "Changed support." }],
   );
 });
+
+test("an update cannot add an MCP server through an existing wildcard grant", async (t) => {
+  const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "shared"));
+  await writeFile(
+    join(f.profilesRoot, "shared", "configuration.json"),
+    JSON.stringify({
+      version: 2,
+      localMcpCatalog: [
+        { id: "fixture", sha256: "0".repeat(64), tools: ["inspect"] },
+      ],
+    }),
+  );
+  const current = v1Draft("helper");
+  current.configuration.tools.whitelist = ["*"];
+  await writeFile(
+    join(f.profilesRoot, "helper", "profile.json"),
+    JSON.stringify(current),
+  );
+  const proposed = {
+    ...current,
+    configuration: {
+      ...current.configuration,
+      resources: { mcp: ["fixture"] },
+    },
+  };
+  const draft = await createProposal(
+    f.profilesRoot,
+    f.proposalsRoot,
+    proposed,
+    UPDATE("helper"),
+  );
+  await assert.rejects(
+    approveProposal(f.profilesRoot, f.proposalsRoot, "helper", draft.digest),
+    /MCP servers/,
+  );
+  assert.equal(
+    (await lookupProfile(f.profilesRoot, "helper")).configuration?.resources,
+    undefined,
+  );
+});

@@ -16,6 +16,8 @@ The operator holds an exclusive host lock per profile for provisioning and the c
 
 The root and terminal manifests scope an exact `undici` 8.12.2 override to Pi Coding Agent 1.3.0. Regenerate each lockfile with npm, not hand edits; `tests/dependencies.test.ts` checks the locks and host resolution, and container acceptance checks the installed external copy. This is a partial SDK dependency mitigation: Pi's published CLI embeds a separate copy that npm overrides do not replace. Keep that limitation visible until a reviewed Pi release fixes its bundle; see [dependency mitigation](../../docs/features/repository-safeguards.md#external-pi-http-dependency).
 
+Selected local MCP runs inside the selected worker, not on the host or a shared service. The image installs only the invented fixture-mcp.mjs at /opt/rex/operator-mcp/fixture.mjs; no normal profile selects it. Shared catalog integrity plus explicit resources.mcp IDs must match before startup. The client uses fixed Node, literal argv, own workspace and private temporary HOME/TMPDIR with no inherited credentials/environment. Await required tool discovery, deny names outside policy, close processes and remove owned temporary state on every exit, and do not reconnect/replay or fall back. No resource tools, indirect discovery, remote MCP/auth or model-driven package installation is enabled. Native MJS keeps checked bytes identical to executed entry-point bytes under the immutable image root. Actual worker snapshots, not plain SDK containers containing public image templates, establish filesystem isolation.
+
 ## Commands
 
 Run from the repository root:

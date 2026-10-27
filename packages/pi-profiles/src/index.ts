@@ -15,6 +15,7 @@ import {
   isToolAllowed,
   loadSharedConfiguration,
   loadWorkspaceInstructions,
+  localMcpToolNames,
   parseProfileRequest,
   parseProfileDefinition,
   planProfileModels,
@@ -38,6 +39,7 @@ export {
   sharedConfigurationDigest,
 } from "./proposals.ts";
 import { loadInstalledExtensions } from "./installed-extensions.ts";
+import { openLocalMcp } from "./local-mcp.ts";
 export { TOOL_NAMES } from "./policy.ts";
 
 export class IncompleteProfileResponseError extends Error {
@@ -60,6 +62,7 @@ export interface ProfileRequestOptions {
   maintain?: boolean;
   modelOverride?: string;
   installedExtensionsRoot?: string;
+  installedMcpRoot?: string;
   signal?: AbortSignal;
 }
 
@@ -103,8 +106,9 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
     request.profileId,
     async () => {
       const profile = runtime.current();
+      const effective = resolveEffectiveProfile(profile, shared);
       const config = requireRunnable(
-        resolveEffectiveProfile(profile, shared).configuration,
+        effective.configuration,
         operatorToolNames(shared),
       );
       const limits = { ...DEFAULT_TURN_LIMITS, ...config.limits };
@@ -130,6 +134,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         limits.deadlineMs,
       );
       deadline.unref();
+      let mcp: Awaited<ReturnType<typeof openLocalMcp>> | undefined;
       try {
         const agentDir = join(state, "agent");
         const sessions = join(state, "sessions");
@@ -194,6 +199,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         const availableNames: readonly string[] = [
           ...TOOL_NAMES,
           ...installed.tools,
+          ...localMcpToolNames(effective.mcpServers ?? []),
         ];
         const toolNames = availableNames.filter((name) =>
           isToolAllowed(config.tools, name),
@@ -419,6 +425,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           streamSimple(model, context, {
             ...options,
             fetch: async (...args) => {
+              mcp?.assertReady();
               const response = await fetch(...args);
               lastStatus = response.status;
               return response;
@@ -494,6 +501,13 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
             "Profile history limit reached; start a new session.",
           );
         }
+        mcp = await openLocalMcp(
+          effective.mcpServers ?? [],
+          options.installedMcpRoot,
+          options.cwd.trim(),
+          agentDir,
+          signal,
+        );
         const { session } = await createAgentSession({
           cwd: options.cwd.trim(),
           agentDir,
@@ -504,9 +518,11 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           excludeTools: availableNames.filter(
             (name) => !toolNames.includes(name),
           ),
-          customTools: options.maintain
-            ? [proposalTool, revisionTool]
-            : [proposalTool],
+          customTools: [
+            proposalTool,
+            ...(options.maintain ? [revisionTool] : []),
+            ...mcp.tools,
+          ],
           resourceLoader: loader,
           settingsManager: settings,
           sessionManager: manager,
@@ -582,6 +598,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
               if (
                 !responseStarted &&
                 installed.factories.length === 0 &&
+                !effective.mcpServers?.length &&
                 [429, 502, 503, 504].includes(lastStatus ?? 0) &&
                 index + 1 < candidates.length
               )
@@ -613,9 +630,13 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           session.dispose();
         }
       } finally {
-        clearTimeout(deadline);
-        await lock.close();
-        await unlink(lockPath);
+        try {
+          await mcp?.close();
+        } finally {
+          clearTimeout(deadline);
+          await lock.close();
+          await unlink(lockPath);
+        }
       }
     },
     { signal },

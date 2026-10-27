@@ -1,5 +1,6 @@
 import {
   isToolAllowed,
+  localMcpToolNames,
   type ProfileConfiguration,
   type ToolPolicy,
   type SharedConfiguration,
@@ -21,6 +22,7 @@ export function operatorToolNames(
     ...new Set<string>([
       ...TOOL_NAMES,
       ...(shared?.extensionCatalog?.flatMap((entry) => [...entry.tools]) ?? []),
+      ...localMcpToolNames(shared?.localMcpCatalog ?? []),
     ]),
   ];
 }

@@ -322,6 +322,7 @@ test("sandbox build context permits only named public runtime files", () => {
     "!verify.ts",
     "!provision.ts",
     "!fixture-extension.mjs",
+    "!fixture-mcp.mjs",
     "!pi.sh",
     "!profiles/",
     "!profiles/coding/",
@@ -340,6 +341,8 @@ test("sandbox build context permits only named public runtime files", () => {
       [
         "index.ts",
         "installed-extensions.ts",
+        "installed-modules.ts",
+        "local-mcp.ts",
         "policy.ts",
         "proposals.ts",
         "cli.ts",
