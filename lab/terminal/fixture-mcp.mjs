@@ -35,7 +35,10 @@ input.on("line", (line) => {
   if (message.method === "initialize") {
     result = {
       protocolVersion: message.params.protocolVersion,
-      capabilities: { tools: {} },
+      capabilities: {
+        tools: {},
+        ...(process.argv.includes("no-resources") ? {} : { resources: {} }),
+      },
       serverInfo: { name: "rex-fixture", version: "0.0.0" },
     };
   } else if (message.method === "tools/list") {
@@ -49,6 +52,61 @@ input.on("line", (line) => {
           additionalProperties: false,
         },
       })),
+    };
+  } else if (message.method === "resources/list") {
+    appendFileSync("mcp-resource-calls.txt", "listed;");
+    result = {
+      resources: [
+        {
+          uri: message.params?.cursor
+            ? "fixture://own/second-evidence"
+            : "fixture://own/evidence",
+          name: "evidence",
+          _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+        },
+      ],
+      ...(message.params?.cursor ? {} : { nextCursor: "next-page" }),
+      _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+    };
+    if (process.argv.includes("bad-resource-meta"))
+      result.resources[0].name = { _meta: "MCP_META_MUST_STAY_PRIVATE" };
+  } else if (
+    message.method === "resources/templates/list" &&
+    !process.argv.includes("no-templates")
+  ) {
+    appendFileSync("mcp-resource-calls.txt", "templates;");
+    result = {
+      resourceTemplates: [
+        {
+          uriTemplate: "fixture://own/{name}",
+          name: "own-evidence",
+          _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+        },
+      ],
+      _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+    };
+  } else if (message.method === "resources/read") {
+    if (
+      !["fixture://own/evidence", "fixture://own/second-evidence"].includes(
+        message.params?.uri,
+      )
+    ) {
+      process.stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: "Synthetic resource unavailable." } })}\n`,
+      );
+      return;
+    }
+    appendFileSync("mcp-resource-calls.txt", "read;");
+    result = {
+      contents: [
+        {
+          uri: message.params.uri,
+          text: readFileSync("mcp-evidence.md", "utf8"),
+          mimeType: "text/markdown",
+          _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+        },
+      ],
+      _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
     };
   } else if (message.method === "tools/call") {
     try {

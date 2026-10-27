@@ -69,11 +69,11 @@ export function checkProfileAcceptance(project: string) {
     IMAGE,
     "-e",
     `const f=require('node:fs'),crypto=require('node:crypto'); const extensionHash=crypto.createHash('sha256').update(f.readFileSync('/opt/rex/operator-extensions/fixture.mjs')).digest('hex'); const mcpHash=crypto.createHash('sha256').update(f.readFileSync('/opt/rex/operator-mcp/fixture.mjs')).digest('hex'); f.mkdirSync('/profiles/shared');
-     f.writeFileSync('/profiles/shared/configuration.json', JSON.stringify({version:2,extensionCatalog:[{id:'fixture',sha256:extensionHash,tools:['fixture_probe']}],localMcpCatalog:[{id:'fixture',sha256:mcpHash,tools:['inspect','mutate'],args:['synthetic-installed']}],resources:{instructions:['resources/common.md']},limits:{deadlineMs:60000,maxRequests:4,maxHistoryBytes:131072},models:['synthetic-model','glm-5.3-flash-cloud','alternate-model'].map(id=>({id,api:'openai-completions',contextWindow:65536,maxOutputTokens:0,reasoning:id!=='glm-5.3-flash-cloud'})),model:{provider:'cli-proxy',id:'synthetic-model',thinking:'low',overrides:['alternate-model'],fallbacks:['alternate-model']},tools:{whitelist:['*'],blacklist:[]}}));
+     f.writeFileSync('/profiles/shared/configuration.json', JSON.stringify({version:2,extensionCatalog:[{id:'fixture',sha256:extensionHash,tools:['fixture_probe']}],localMcpCatalog:[{id:'fixture',sha256:mcpHash,tools:['inspect','mutate'],args:['synthetic-installed'],resources:true}],resources:{instructions:['resources/common.md']},limits:{deadlineMs:60000,maxRequests:4,maxHistoryBytes:131072},models:['synthetic-model','glm-5.3-flash-cloud','alternate-model'].map(id=>({id,api:'openai-completions',contextWindow:65536,maxOutputTokens:0,reasoning:id!=='glm-5.3-flash-cloud'})),model:{provider:'cli-proxy',id:'synthetic-model',thinking:'low',overrides:['alternate-model'],fallbacks:['alternate-model']},tools:{whitelist:['*'],blacklist:[]}}));
      f.mkdirSync('/profiles/shared/resources'); f.writeFileSync('/profiles/shared/resources/common.md','Shared resource instruction.');
      f.writeFileSync('/profiles/shared/REX_SOUL.md','Common synthetic instructions.');
      f.mkdirSync('/profiles/extension-check'); f.writeFileSync('/profiles/extension-check/SOUL.md','Synthetic extension acceptance.'); f.writeFileSync('/profiles/extension-check/profile.json',JSON.stringify({version:2,id:'extension-check',resources:{extensions:['fixture']},tools:{whitelist:['read','ls','fixture_probe'],blacklist:['write','edit','bash','propose_profile']}}));
-     f.mkdirSync('/profiles/mcp-check'); f.writeFileSync('/profiles/mcp-check/SOUL.md','Synthetic local MCP acceptance.'); f.writeFileSync('/profiles/mcp-check/profile.json',JSON.stringify({version:2,id:'mcp-check',resources:{mcp:['fixture']},tools:{whitelist:['read','ls','mcp__fixture__inspect'],blacklist:['mcp__fixture__mutate','write','edit','bash','propose_profile']}}));
+     f.mkdirSync('/profiles/mcp-check'); f.writeFileSync('/profiles/mcp-check/SOUL.md','Synthetic local MCP acceptance.'); f.writeFileSync('/profiles/mcp-check/profile.json',JSON.stringify({version:2,id:'mcp-check',resources:{mcp:['fixture']},tools:{whitelist:['read','ls','mcp__fixture__inspect','list_mcp_resources','list_mcp_resource_templates','read_mcp_resource'],blacklist:['mcp__fixture__mutate','write','edit','bash','propose_profile']}}));
      f.mkdirSync('/profiles/limits-check'); f.writeFileSync('/profiles/limits-check/SOUL.md','Limited synthetic profile.'); f.writeFileSync('/profiles/limits-check/profile.json',JSON.stringify({version:2,id:'limits-check',limits:{maxRequests:1}}));
      f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.'); f.mkdirSync('/profiles/soul-check/resources'); f.writeFileSync('/profiles/soul-check/resources/own.md','Own resource instruction.'); f.writeFileSync('/profiles/soul-check/resources/ignored.md','Ignored resource text.'); f.mkdirSync('/profiles/soul-check/resources/skills/review',{recursive:true}); f.writeFileSync('/profiles/soul-check/resources/skills/review/SKILL.md','---\\nname: review\\ndescription: Selected synthetic skill description.\\n---\\nSKILL_BODY_AFTER_LOADING'); f.writeFileSync('/profiles/soul-check/resources/skills/review/support.md','REFERENCE_BODY_AFTER_LOADING'); f.mkdirSync('/profiles/soul-check/resources/prompts'); f.writeFileSync('/profiles/soul-check/resources/prompts/review.md','synthetic-template $1'); f.writeFileSync('/profiles/soul-check/profile.json',JSON.stringify({version:2,id:'soul-check',resources:{workspaceInstructions:['AGENTS.md'],instructions:['resources/own.md'],skills:['resources/skills/review/SKILL.md'],prompts:['resources/prompts/review.md'],references:['resources/skills/review/support.md']}}));`,
   ]);
@@ -85,7 +85,7 @@ export function checkProfileAcceptance(project: string) {
       command: [
         "node",
         "-e",
-        "require('node:fs').writeFileSync('/workspace/mcp-workspace-proof.txt','synthetic-own-workspace');",
+        "const f=require('node:fs');f.writeFileSync('/workspace/mcp-workspace-proof.txt','synthetic-own-workspace');f.writeFileSync('/workspace/mcp-evidence.md','INSTALLED_RESOURCE_EVIDENCE');",
       ],
     }),
   );
@@ -112,6 +112,9 @@ export function checkProfileAcceptance(project: string) {
     );
   requireSuccess(run("mcp-check", "synthetic-mcp-inspect", true));
   requireSuccess(run("mcp-check", "synthetic-mcp-denied", true));
+  requireSuccess(run("mcp-check", "synthetic-mcp-resource-list", true));
+  requireSuccess(run("mcp-check", "synthetic-mcp-resource-templates", true));
+  requireSuccess(run("mcp-check", "synthetic-mcp-resource-read", true));
   requireSuccess(
     runProfileWorker({
       project,
@@ -119,7 +122,7 @@ export function checkProfileAcceptance(project: string) {
       command: [
         "node",
         "-e",
-        "const f=require('node:fs'),a=require('node:assert/strict');a.equal(f.readFileSync('/workspace/mcp-marker.txt','utf8'),'executed');a.equal(f.readFileSync('/workspace/mcp-calls.txt','utf8'),'called');a.equal(f.readFileSync('/workspace/mcp-exit.txt','utf8'),'closed');a.equal(f.existsSync('/workspace/mcp-forbidden.txt'),false);a.equal(f.readdirSync('/state/profiles/mcp-check/agent').some(name=>name.startsWith('mcp-')),false);",
+        "const f=require('node:fs'),a=require('node:assert/strict');a.equal(f.readFileSync('/workspace/mcp-marker.txt','utf8'),'executed');a.equal(f.readFileSync('/workspace/mcp-calls.txt','utf8'),'called');a.equal(f.readFileSync('/workspace/mcp-resource-calls.txt','utf8'),'listed;templates;read;');a.equal(f.readFileSync('/workspace/mcp-exit.txt','utf8'),'closed');a.equal(f.existsSync('/workspace/mcp-forbidden.txt'),false);a.equal(f.readdirSync('/state/profiles/mcp-check/agent').some(name=>name.startsWith('mcp-')),false);",
       ],
     }),
   );

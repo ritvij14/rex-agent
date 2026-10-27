@@ -63,7 +63,29 @@ test("local MCP catalog freezes literal arguments and canonical tool names", () 
   ]);
   assert.deepEqual(profiles.localMcpToolNames(catalog), [
     "mcp__local_docs__read_file",
+    "list_mcp_resources",
+    "list_mcp_resource_templates",
+    "read_mcp_resource",
   ]);
+  const multiple = profiles.parseLocalMcpCatalog([
+    { ...entry(), resources: true },
+    { ...entry(), id: "second", resources: true },
+  ]);
+  assert.equal(
+    profiles
+      .localMcpToolNames(multiple)
+      .filter((name) => name === "read_mcp_resource").length,
+    1,
+  );
+  assert.throws(() =>
+    profiles.parseSharedConfiguration({
+      version: 2,
+      localMcpCatalog: catalog,
+      extensionCatalog: [
+        { id: "shadow", sha256: "a".repeat(64), tools: ["read_mcp_resource"] },
+      ],
+    }),
+  );
   assert.ok(Object.isFrozen(catalog));
   assert.ok(Object.isFrozen(catalog[0]));
   assert.ok(Object.isFrozen(catalog[0]!.args));

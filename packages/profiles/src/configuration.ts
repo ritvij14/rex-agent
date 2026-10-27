@@ -772,14 +772,23 @@ export interface LocalMcpServer {
   readonly resources: boolean;
 }
 
-export function localMcpToolNames(catalog: readonly LocalMcpServer[]) {
-  return Object.freeze(
-    catalog.flatMap((entry) =>
-      entry.tools.map((tool) =>
-        `mcp__${entry.id}__${tool}`.replace(/[^A-Za-z0-9_]/g, "_"),
-      ),
-    ),
+function mcpServerToolNames(entry: LocalMcpServer) {
+  return entry.tools.map((tool) =>
+    `mcp__${entry.id}__${tool}`.replace(/[^A-Za-z0-9_]/g, "_"),
   );
+}
+
+export function localMcpToolNames(catalog: readonly LocalMcpServer[]) {
+  return Object.freeze([
+    ...catalog.flatMap(mcpServerToolNames),
+    ...(catalog.some((entry) => entry.resources)
+      ? [
+          "list_mcp_resources",
+          "list_mcp_resource_templates",
+          "read_mcp_resource",
+        ]
+      : []),
+  ]);
 }
 
 export function parseLocalMcpCatalog(
@@ -839,7 +848,7 @@ export function parseLocalMcpCatalog(
         args: Object.freeze([...(args as string[])]),
         resources: entry.resources === true,
       });
-      for (const name of localMcpToolNames([parsed])) {
+      for (const name of mcpServerToolNames(parsed)) {
         if (name.length > 64 || names.has(name))
           throw new ProfileError("INVALID_MCP_CATALOG");
         names.add(name);

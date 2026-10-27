@@ -1452,6 +1452,7 @@ test("fallback never replays lifecycle hooks from installed executable code", as
 async function mcpFixture(
   t: TestContext,
   mode = "literal ${HOME}; !not-a-command",
+  resources = false,
 ) {
   const { createHash } = await import("node:crypto");
   const f = await fixture(t);
@@ -1475,6 +1476,7 @@ async function mcpFixture(
         sha256: createHash("sha256").update(code).digest("hex"),
         tools: ["inspect", "mutate"],
         args: [mode],
+        resources,
       },
     ],
   };
@@ -1487,6 +1489,12 @@ async function mcpFixture(
     "mcp__fixture__mutate",
   );
   definition.configuration.tools.blacklist.push("mcp__fixture__mutate");
+  if (resources)
+    definition.configuration.tools.whitelist.push(
+      "list_mcp_resources",
+      "list_mcp_resource_templates",
+      "read_mcp_resource",
+    );
   await writeFile(manifest, JSON.stringify(definition));
   const options = {
     ...f,
@@ -1677,6 +1685,160 @@ test("failed MCP protocol or invalid results stop continuation before another si
     );
     await assertMcpStopped(f.cwd);
   }
+});
+
+test("authorized MCP resources list one page and read only after an explicit request", async (t) => {
+  const f = await mcpFixture(t, "normal", true);
+  await writeFile(join(f.cwd, "mcp-evidence.md"), "RESOURCE_ONLY_AFTER_READ");
+  f.replies.push(
+    { tool: "list_mcp_resources", args: { server: "fixture" } },
+    { text: "listed" },
+  );
+  await runProfileRequest(f.options);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "fixture://own/evidence",
+    ),
+  );
+  assert.ok(
+    !JSON.stringify(f.received.at(-1)!.messages).includes(
+      "RESOURCE_ONLY_AFTER_READ",
+    ),
+  );
+  assert.ok(
+    !JSON.stringify(f.received.at(-1)!.messages).includes("second-evidence"),
+  );
+  assert.ok(JSON.stringify(f.received.at(-1)!.messages).includes("next-page"));
+  assert.equal(
+    await readFile(join(f.cwd, "mcp-resource-calls.txt"), "utf8"),
+    "listed;",
+  );
+  f.replies.push(
+    {
+      tool: "list_mcp_resources",
+      args: { server: "fixture", cursor: "next-page" },
+    },
+    { text: "next" },
+  );
+  await runProfileRequest(f.options);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "fixture://own/second-evidence",
+    ),
+  );
+  f.replies.push(
+    { tool: "list_mcp_resource_templates", args: { server: "fixture" } },
+    { text: "templates" },
+  );
+  await runProfileRequest(f.options);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "fixture://own/{name}",
+    ),
+  );
+  f.replies.push(
+    {
+      tool: "read_mcp_resource",
+      args: { server: "fixture", uri: "fixture://own/evidence" },
+    },
+    { text: "read" },
+  );
+  await runProfileRequest(f.options);
+  assert.ok(
+    JSON.stringify(f.received.at(-1)!.messages).includes(
+      "RESOURCE_ONLY_AFTER_READ",
+    ),
+  );
+  assert.equal(
+    await readFile(join(f.cwd, "mcp-resource-calls.txt"), "utf8"),
+    "listed;listed;templates;read;",
+  );
+  assert.ok(!JSON.stringify(f.received).includes("MCP_META_MUST_STAY_PRIVATE"));
+  await assertMcpStopped(f.cwd);
+});
+
+test("MCP resource opt-out, tool denial and unselected servers cannot reach a backend", async (t) => {
+  const off = await mcpFixture(t);
+  off.replies.push(
+    {
+      tool: "read_mcp_resource",
+      args: { server: "fixture", uri: "fixture://own/evidence" },
+    },
+    { text: "not enabled" },
+  );
+  await runProfileRequest(off.options);
+  await assert.rejects(readFile(join(off.cwd, "mcp-resource-calls.txt")));
+  const f = await mcpFixture(t, "normal", true);
+  f.shared.localMcpCatalog.push({
+    ...f.shared.localMcpCatalog[0]!,
+    id: "unselected",
+  });
+  await writeFile(f.sharedPath, JSON.stringify(f.shared));
+  f.replies.push(
+    {
+      tool: "read_mcp_resource",
+      args: { server: "unselected", uri: "fixture://own/evidence" },
+    },
+    { text: "denied" },
+  );
+  await runProfileRequest(f.options);
+  await assert.rejects(readFile(join(f.cwd, "mcp-resource-calls.txt")));
+  f.replies.push(
+    { tool: "read_mcp_resource", args: { uri: "fixture://own/evidence" } },
+    { text: "missing server denied" },
+  );
+  await runProfileRequest(f.options);
+  await assert.rejects(readFile(join(f.cwd, "mcp-resource-calls.txt")));
+  f.definition.configuration.tools.blacklist.push("read_mcp_resource");
+  await writeFile(f.manifest, JSON.stringify(f.definition));
+  f.replies.push(
+    {
+      tool: "read_mcp_resource",
+      args: { server: "fixture", uri: "fixture://own/evidence" },
+    },
+    { text: "denied" },
+  );
+  const result = await runProfileRequest(f.options);
+  const records = (await readFile(result.sessionFile!, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.ok(
+    records.some(
+      (entry) =>
+        entry.message?.toolName === "read_mcp_resource" &&
+        entry.message.isError === true,
+    ),
+  );
+  await assert.rejects(readFile(join(f.cwd, "mcp-resource-calls.txt")));
+  await assertMcpStopped(f.cwd);
+});
+
+test("MCP resource capability must exist and absent template methods return an empty page", async (t) => {
+  const absent = await mcpFixture(t, "no-resources", true);
+  await assert.rejects(runProfileRequest(absent.options), /Local MCP/);
+  assert.equal(absent.received.length, 0);
+  await assertMcpStopped(absent.cwd);
+  const f = await mcpFixture(t, "no-templates", true);
+  f.replies.push(
+    { tool: "list_mcp_resource_templates", args: { server: "fixture" } },
+    { text: "empty" },
+  );
+  await runProfileRequest(f.options);
+  const message = f.received
+    .at(-1)!
+    .messages.find((message) => message.role === "tool")!;
+  assert.deepEqual(JSON.parse(message.content as string).resourceTemplates, []);
+  await assertMcpStopped(f.cwd);
+});
+
+test("malformed MCP public descriptors cannot expose nested private metadata", async (t) => {
+  const f = await mcpFixture(t, "bad-resource-meta", true);
+  f.replies.push({ tool: "list_mcp_resources", args: { server: "fixture" } });
+  await assert.rejects(runProfileRequest(f.options));
+  assert.equal(f.received.length, 1);
+  assert.ok(!JSON.stringify(f.received).includes("MCP_META_MUST_STAY_PRIVATE"));
+  await assertMcpStopped(f.cwd);
 });
 
 test("a dropped local MCP call is never reconnected or replayed", async (t) => {

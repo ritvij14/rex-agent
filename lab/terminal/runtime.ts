@@ -159,6 +159,18 @@ async function main() {
             },
             failed: true,
           },
+          "synthetic-mcp-resource-list": {
+            name: "list_mcp_resources",
+            args: { server: "fixture" },
+          },
+          "synthetic-mcp-resource-templates": {
+            name: "list_mcp_resource_templates",
+            args: { server: "fixture" },
+          },
+          "synthetic-mcp-resource-read": {
+            name: "read_mcp_resource",
+            args: { server: "fixture", uri: "fixture://own/evidence" },
+          },
           "synthetic-mcp-inspect": { name: "mcp__fixture__inspect", args: {} },
           "synthetic-mcp-denied": {
             name: "mcp__fixture__mutate",
@@ -258,6 +270,22 @@ async function main() {
           ) {
             res.writeHead(400);
             res.end('{"error":"MCP isolation outcome mismatch"}');
+            return;
+          }
+        }
+        if (text.includes("synthetic-mcp-resource") && called) {
+          const result = JSON.stringify(last?.content);
+          const expected = text.includes("synthetic-mcp-resource-read")
+            ? "INSTALLED_RESOURCE_EVIDENCE"
+            : text.includes("synthetic-mcp-resource-templates")
+              ? "fixture://own/{name}"
+              : "fixture://own/evidence";
+          if (
+            !result.includes(expected) ||
+            requestText.includes("MCP_META_MUST_STAY_PRIVATE")
+          ) {
+            res.writeHead(400);
+            res.end('{"error":"MCP resource outcome mismatch"}');
             return;
           }
         }
