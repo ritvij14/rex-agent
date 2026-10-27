@@ -1,6 +1,7 @@
 const messages = {
   UNSUPPORTED_PROFILE_VERSION: "Profile definition version is not supported.",
   INVALID_SHARED_CONFIGURATION: "Shared profile configuration is invalid.",
+  INVALID_MCP_CATALOG: "Local MCP catalog is invalid.",
   SHARED_CONFIGURATION_UNAVAILABLE:
     "Shared profile configuration is unavailable.",
   PROFILE_INCOMPLETE: "Profile configuration is incomplete.",

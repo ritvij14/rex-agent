@@ -36,4 +36,6 @@ ResourceConfiguration supports explicit instructions, skills, prompts, and lazy 
 
 resources.workspaceInstructions references dynamic files relative to the trusted own workspace, not the definition bundle. loadWorkspaceInstructions rejects unsafe paths/links, reads bounded regular Markdown, freezes results, and redacts errors. resourcePaths intentionally excludes these dynamic paths from bundle-file serialization; their reference list itself remains in the digest.
 
+parseLocalMcpCatalog/localMcpToolNames are standalone pure metadata utilities, not enabled shared/profile MCP configuration. Reject unsupported execution/auth fields, inherited required properties, normalization collisions and names exceeding Pi's 64-character bound. Copy/freeze arguments and tool arrays; arguments remain literal. Test through the public export with malformed/bounded inputs and verify runnable manifests still reject MCP until an adapter can enforce it. Core must not launch a process or import Pi for this validation.
+
 Shared extensionCatalog validates bounded ID/integrity/tool metadata only; resources.extensions selects IDs independently from resourcePaths text files. Core never imports executable modules. Adapter import from an operator-installed immutable root, tool enforcement, and catalog matching are separate trusted execution responsibilities.

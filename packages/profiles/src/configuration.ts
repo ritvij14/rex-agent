@@ -743,6 +743,92 @@ export function parseProfileArguments(args: readonly string[]) {
   };
 }
 
+export interface LocalMcpServer {
+  readonly id: string;
+  readonly sha256: string;
+  readonly tools: readonly string[];
+  readonly args: readonly string[];
+  readonly resources: boolean;
+}
+
+export function localMcpToolNames(catalog: readonly LocalMcpServer[]) {
+  return Object.freeze(
+    catalog.flatMap((entry) =>
+      entry.tools.map((tool) =>
+        `mcp__${entry.id}__${tool}`.replace(/[^A-Za-z0-9_]/g, "_"),
+      ),
+    ),
+  );
+}
+
+export function parseLocalMcpCatalog(
+  value: unknown,
+): readonly LocalMcpServer[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8)
+    throw new ProfileError("INVALID_MCP_CATALOG");
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      if (
+        !isPlainObject(entry) ||
+        ["id", "sha256", "tools"].some((key) => !Object.hasOwn(entry, key)) ||
+        Object.keys(entry).some(
+          (key) =>
+            !["id", "sha256", "tools", "args", "resources"].includes(key),
+        ) ||
+        typeof entry.id !== "string" ||
+        entry.id.length > 64 ||
+        !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(entry.id) ||
+        entry.id !== entry.id.trim() ||
+        ids.has(entry.id) ||
+        typeof entry.sha256 !== "string" ||
+        entry.sha256.length !== 64 ||
+        !/^[a-f0-9]{64}$/.test(entry.sha256) ||
+        !Array.isArray(entry.tools) ||
+        entry.tools.length > 32 ||
+        entry.tools.some(
+          (tool) =>
+            typeof tool !== "string" ||
+            tool !== tool.trim() ||
+            !/^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(tool),
+        ) ||
+        (Object.hasOwn(entry, "resources") &&
+          typeof entry.resources !== "boolean")
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      const args = Object.hasOwn(entry, "args") ? entry.args : [];
+      if (
+        !Array.isArray(args) ||
+        args.length > 16 ||
+        args.some(
+          (arg) =>
+            typeof arg !== "string" ||
+            Buffer.byteLength(arg) > 512 ||
+            /[\x00-\x1f\x7f]/.test(arg),
+        ) ||
+        args.reduce((sum, arg: string) => sum + Buffer.byteLength(arg), 0) >
+          4096
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      const parsed = Object.freeze({
+        id: entry.id,
+        sha256: entry.sha256,
+        tools: Object.freeze([...(entry.tools as string[])]),
+        args: Object.freeze([...(args as string[])]),
+        resources: entry.resources === true,
+      });
+      for (const name of localMcpToolNames([parsed])) {
+        if (name.length > 64 || names.has(name))
+          throw new ProfileError("INVALID_MCP_CATALOG");
+        names.add(name);
+      }
+      ids.add(parsed.id);
+      return parsed;
+    }),
+  );
+}
+
 export function planProfileModels(
   model: ModelReference,
   catalog?: readonly CatalogModel[],

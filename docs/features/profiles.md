@@ -101,10 +101,15 @@ Import through `@rex/profiles`, never internal files. Root tooling runs this pri
 | `lookupProfile(root, id)` | Return frozen `{ id, home, configuration?, soul?, model?, tools? }` after validation |
 | `loadSharedConfiguration(sharedRoot)` | Validate and freeze configuration from the explicitly supplied shared directory |
 | `resolveEffectiveProfile(profile, shared?)` | Pure composition of shared defaults, SOUL personas, overrides and mandatory denials |
+| `parseLocalMcpCatalog(value)`, `localMcpToolNames(catalog)` | Validate standalone local-MCP metadata and derive stable tool names; no connection or manifest enablement |
 | `new ProfileRuntime(root)` | Own independent asynchronous turn storage |
 | `runtime.run(id, work, { signal? })` | Look up the selected ID and run the complete callback under its fixed profile |
 | `runtime.current()` | Return the current profile; reject missing, closed or cancelled scopes |
 | `parseProfileDefinition`, `parseSharedConfiguration`, `parseProfileRequest`, `isToolAllowed` | Validate data, require the selector, and evaluate tool rules without Pi |
+
+`parseLocalMcpCatalog` accepts one to eight entries with required `id`, `sha256`, `tools`, and optional `args` and `resources`. IDs use lowercase kebab-case (up to 64 characters); SHA-256 is exactly 64 lowercase hex characters. Each entry declares up to 32 raw tool names. Canonical `mcp__<id>__<tool>` names replace hyphens with underscores; collisions and names exceeding Pi's 64-character provider limit are rejected rather than silently hashed. Arguments are literal strings: at most 16 per entry, 512 UTF-8 bytes each and 4096 combined, without control characters. Missing args/resources normalize to frozen `[]`/`false`. Unknown fields, commands, URLs, environment, credentials and working-directory configuration are rejected with the fixed `INVALID_MCP_CATALOG` diagnostic.
+
+This is a pure metadata utility only. Shared/profile manifests still reject MCP fields, the adapter does not launch servers, and validation does not read code, start a process, expand arguments or grant tools. No local/remote MCP runtime support is implied.
 
 `validateProfileId`, `ProfileError`/`ProfileErrorCode` and the profile/configuration/policy/run-option types are also exported. Definitions are revalidated for every turn; a running turn keeps its frozen selection. The runtime accepts an ID, not a caller-fabricated home.
 
