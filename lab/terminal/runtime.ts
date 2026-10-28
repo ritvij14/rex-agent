@@ -159,6 +159,32 @@ async function main() {
             },
             failed: true,
           },
+          "synthetic-discovery-use": {
+            name: "tool_search",
+            args: { query: "inspect", limit: 1 },
+          },
+          "synthetic-discovery-script": {
+            name: "codemode",
+            args: {
+              code: "const matches=await searchTools('inspect',{namespace:'discovery',limit:1});text(matches);text(await describeNamespace('discovery'));text(await tools[matches[0].name]({}));text(await tools.read_mcp_resource({server:'discovery',uri:'fixture://own/evidence'}));",
+            },
+          },
+          "synthetic-discovery-denied": {
+            name: "tool_search",
+            args: { query: "mutate" },
+          },
+          "synthetic-discovery-forbidden": {
+            name: "mcp__discovery__mutate",
+            args: {},
+            failed: true,
+          },
+          "synthetic-uncertain-script": {
+            name: "codemode",
+            args: {
+              code: "await tools.write({path:'before-uncertain.txt',content:'before'});try {await tools.mcp__uncertain__inspect({});} catch {} await tools.write({path:'after-uncertain.txt',content:'after'});",
+            },
+            failed: true,
+          },
           "synthetic-codemode-allowed": {
             name: "codemode",
             args: {
@@ -274,17 +300,67 @@ async function main() {
             },
           },
         };
-        const task = Object.entries(tasks).find(([name]) =>
+        let task = Object.entries(tasks).find(([name]) =>
           text.includes(name),
         )?.[1];
         const last = payload.messages.at(-1);
-        const called = task && last?.role === "tool";
+        let called = task && last?.role === "tool";
         if (called) {
           const result = JSON.stringify(last.content);
           const failed = /ENOENT|not found|denied|error/i.test(result);
-          if (failed !== Boolean(task.failed)) {
+          if (failed !== Boolean(task?.failed)) {
             res.writeHead(400);
             res.end('{"error":"synthetic tool outcome mismatch"}');
+            return;
+          }
+        }
+        if (text.includes("synthetic-discovery")) {
+          const names = (payload.tools ?? []).map(
+            (tool: { function?: { name?: string } }) => tool.function?.name,
+          );
+          if (
+            JSON.stringify(payload.tools).includes("mcp__fixture__") ||
+            names.includes("mcp__discovery__mutate") ||
+            (!called &&
+              (names.includes("mcp__discovery__inspect") ||
+                JSON.stringify(payload.tools).includes(
+                  "Synthetic fixture inspect",
+                )))
+          ) {
+            res.writeHead(400);
+            res.end('{"error":"deferred declaration scope mismatch"}');
+            return;
+          }
+          if (
+            text.includes("synthetic-discovery-use") &&
+            called &&
+            String(last.content).startsWith("Loaded ")
+          ) {
+            if (!names.includes("mcp__discovery__inspect")) {
+              res.writeHead(400);
+              res.end('{"error":"discovered tool was not declared"}');
+              return;
+            }
+            task = { name: "mcp__discovery__inspect", args: {} };
+            called = false;
+          }
+          if (
+            text.includes("synthetic-discovery-denied") &&
+            called &&
+            !String(last.content).includes("No matching tools found")
+          ) {
+            res.writeHead(400);
+            res.end('{"error":"denied metadata discovered"}');
+            return;
+          }
+          if (
+            text.includes("synthetic-discovery-script") &&
+            called &&
+            (!String(last.content).includes("INSTALLED_RESOURCE_EVIDENCE") ||
+              !String(last.content).includes("mcp__discovery"))
+          ) {
+            res.writeHead(400);
+            res.end('{"error":"script discovery outcome mismatch"}');
             return;
           }
         }
@@ -360,7 +436,7 @@ async function main() {
           res.end('{"error":"Codemode output mismatch"}');
           return;
         }
-        const invoke = task && !called;
+        const invoke = called ? undefined : task;
         res.setHeader("content-type", "text/event-stream");
         const chunk = {
           id: "synthetic-response",
@@ -375,11 +451,15 @@ async function main() {
                     tool_calls: [
                       {
                         index: 0,
-                        id: "synthetic-call",
+                        id:
+                          text.includes("synthetic-discovery-use") &&
+                          invoke.name === "mcp__discovery__inspect"
+                            ? "synthetic-discovered-call"
+                            : "synthetic-call",
                         type: "function",
                         function: {
-                          name: task.name,
-                          arguments: JSON.stringify(task.args),
+                          name: invoke.name,
+                          arguments: JSON.stringify(invoke.args),
                         },
                       },
                     ],

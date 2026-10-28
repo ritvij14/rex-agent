@@ -14,6 +14,7 @@ export const TOOL_NAMES = [
   "ls",
   "propose_profile",
   "codemode",
+  "tool_search",
 ] as const;
 
 export function operatorToolNames(

@@ -151,6 +151,8 @@ export async function openLocalMcp(
         tools.push({
           name: names[toolIndex]!,
           label: `${entry.id}/${rawName}`,
+          exposure: entry.exposure ?? "direct",
+          namespace: { name: `mcp__${entry.id}`, aliases: [entry.id] },
           description: tool.description ?? `Local MCP tool ${rawName}`,
           parameters: Type.Unsafe({
             ...tool.inputSchema,

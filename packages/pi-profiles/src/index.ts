@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import {
   createAgentSession,
   createCodemodeExtension,
+  createToolSearchExtension,
   loadSkills,
   DefaultResourceLoader,
   ModelRuntime,
@@ -197,16 +198,33 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           extensionIds,
           options.installedExtensionsRoot,
         );
-        const builtinFactories = effective.codemode
-          ? [createCodemodeExtension({ models: false })]
-          : [];
-        const registeredExtensions = [
-          ...installed.tools,
-          ...(effective.codemode ? ["codemode"] : []),
+        const indirectNames = new Set(
+          (effective.mcpServers ?? [])
+            .filter((entry) => entry.exposure && entry.exposure !== "direct")
+            .flatMap((entry) =>
+              localMcpToolNames([{ ...entry, resources: false }]),
+            ),
+        );
+        const builtins = [
+          ...(effective.codemode
+            ? [
+                {
+                  name: "codemode",
+                  factory: createCodemodeExtension({ models: false }),
+                },
+              ]
+            : []),
+          ...(indirectNames.size
+            ? [{ name: "tool_search", factory: createToolSearchExtension() }]
+            : []),
         ];
+        const builtinNames = builtins.map((entry) => entry.name);
+        const registeredExtensions = [...installed.tools, ...builtinNames];
         const availableNames: readonly string[] = [
           ...TOOL_NAMES.filter(
-            (name) => name !== "codemode" || effective.codemode,
+            (name) =>
+              !["codemode", "tool_search"].includes(name) ||
+              builtinNames.includes(name),
           ),
           ...installed.tools,
           ...localMcpToolNames(effective.mcpServers ?? []),
@@ -214,9 +232,12 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         const toolNames = availableNames.filter((name) =>
           isToolAllowed(config.tools, name),
         );
+        const directNames = toolNames.filter(
+          (name) => !indirectNames.has(name),
+        );
         const visible = options.maintain
-          ? [...toolNames, "revise_profile"]
-          : toolNames;
+          ? [...directNames, "revise_profile"]
+          : directNames;
         const workspacePaths = [
           ...new Set([
             ...(shared?.resources?.workspaceInstructions ?? []),
@@ -456,12 +477,21 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           appendSystemPrompt: [],
           systemPromptOverride: () => instructions,
           extensionFactories: [
-            ...builtinFactories,
+            ...builtins.map((entry) => entry.factory),
             ...installed.factories,
             (pi) => {
               pi.on("tool_call", (event) => {
                 runtime.current();
                 responseStarted = true;
+                try {
+                  mcp?.assertReady();
+                } catch {
+                  return {
+                    block: true,
+                    reason:
+                      "Local MCP connection is unavailable; earlier actions may have completed.",
+                  };
+                }
                 if (event.toolName === "revise_profile") {
                   if (!options.maintain) {
                     denied.push(event.toolName);
@@ -622,7 +652,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
               profileId: profile.id,
               model: selection.id,
               attempts,
-              toolNames: visible,
+              toolNames: session.getActiveToolNames(),
               denied,
               sessionFile: session.sessionFile,
               output: answers

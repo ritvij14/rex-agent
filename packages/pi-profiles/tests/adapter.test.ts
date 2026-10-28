@@ -1523,6 +1523,132 @@ async function assertMcpStopped(cwd: string) {
   );
 }
 
+test("deferred tool search needs its own grant but does not need Codemode", async (t) => {
+  for (const grant of ["allow", "blacklist", "no-grant"]) {
+    const f = await mcpFixture(t);
+    await writeFile(
+      f.sharedPath,
+      JSON.stringify({
+        ...f.shared,
+        localMcpCatalog: f.shared.localMcpCatalog.map((entry) => ({
+          ...entry,
+          exposure: "deferred",
+        })),
+      }),
+    );
+    if (grant !== "no-grant")
+      f.definition.configuration.tools.whitelist.push("tool_search");
+    if (grant === "blacklist")
+      f.definition.configuration.tools.blacklist.push("tool_search");
+    await writeFile(f.manifest, JSON.stringify(f.definition));
+    f.replies.push({ tool: "tool_search", args: { query: "inspect" } });
+    if (grant === "allow")
+      f.replies.push({ tool: "mcp__fixture__inspect", args: {} });
+    f.replies.push({ text: "finished" });
+    const result = await runProfileRequest(f.options);
+    assert.ok(!result.toolNames.includes("codemode"));
+    assert.equal(result.toolNames.includes("tool_search"), grant === "allow");
+    if (grant === "allow")
+      assert.equal(
+        await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"),
+        "called",
+      );
+    else await assert.rejects(readFile(join(f.cwd, "mcp-calls.txt")));
+    await assertMcpStopped(f.cwd);
+  }
+});
+
+test("indirect MCP exposure hides initial declarations and discovery cannot reveal denied tools", async (t) => {
+  for (const exposure of ["codemode", "deferred"]) {
+    const f = await mcpFixture(t, exposure);
+    await writeFile(
+      f.sharedPath,
+      JSON.stringify({
+        ...f.shared,
+        localMcpCatalog: f.shared.localMcpCatalog.map((entry) => ({
+          ...entry,
+          exposure,
+        })),
+      }),
+    );
+    f.definition.configuration.resources.codemode = true;
+    f.definition.configuration.tools.whitelist.push("codemode", "tool_search");
+    await writeFile(f.manifest, JSON.stringify(f.definition));
+    f.replies.push(
+      { tool: "tool_search", args: { query: "inspect", limit: 1 } },
+      { tool: "mcp__fixture__inspect", args: {} },
+      {
+        tool: "codemode",
+        args: {
+          code: "const matches=await searchTools('inspect',{namespace:'fixture',limit:1});text(matches);text(await describeNamespace('fixture'));text(await tools[matches[0].name]({}));",
+        },
+      },
+      { tool: "tool_search", args: { query: "mutate" } },
+      { tool: "mcp__fixture__mutate", args: {} },
+      { text: "finished" },
+    );
+    const result = await runProfileRequest(f.options);
+    assert.ok(result.toolNames.includes("mcp__fixture__inspect"));
+    assert.ok(!result.toolNames.includes("mcp__fixture__mutate"));
+    const initial = f.received[0]!.tools!.map((tool) => tool.function.name);
+    assert.ok(initial.includes("tool_search"));
+    assert.ok(!initial.includes("mcp__fixture__inspect"));
+    assert.ok(!initial.includes("mcp__fixture__mutate"));
+    if (exposure === "deferred")
+      assert.ok(
+        !JSON.stringify(f.received[0]!.tools).includes(
+          "Synthetic fixture inspect",
+        ),
+      );
+    assert.ok(
+      f.received[1]!.tools!.some(
+        (tool) => tool.function.name === "mcp__fixture__inspect",
+      ),
+    );
+    const discovery = f.received[4]!.messages.findLast(
+      (message) => message.role === "tool",
+    )!.content as string;
+    assert.ok(discovery.includes("No matching tools found"));
+    const scriptResult = f.received[3]!.messages.findLast(
+      (message) => message.role === "tool",
+    )!.content as string;
+    assert.ok(scriptResult.includes("mcp__fixture"));
+    assert.ok(!scriptResult.includes("mcp__fixture__mutate"));
+    assert.equal(
+      await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"),
+      "calledcalled",
+    );
+    await assert.rejects(readFile(join(f.cwd, "mcp-forbidden.txt")));
+    await assertMcpStopped(f.cwd);
+  }
+});
+
+test("a caught MCP protocol failure cannot permit another scripted side effect", async (t) => {
+  const f = await mcpFixture(t, "reject-tool");
+  f.definition.configuration.resources.codemode = true;
+  f.definition.configuration.tools.whitelist.push("codemode", "write");
+  f.definition.configuration.tools.blacklist =
+    f.definition.configuration.tools.blacklist.filter(
+      (name: string) => name !== "write",
+    );
+  await writeFile(f.manifest, JSON.stringify(f.definition));
+  f.replies.push({
+    tool: "codemode",
+    args: {
+      code: "await tools.write({path:'before-uncertain.txt',content:'before'});try {await tools.mcp__fixture__inspect({});} catch {} await tools.write({path:'after-uncertain.txt',content:'after'});",
+    },
+  });
+  await assert.rejects(runProfileRequest(f.options));
+  assert.equal(
+    await readFile(join(f.cwd, "before-uncertain.txt"), "utf8"),
+    "before",
+  );
+  await assert.rejects(readFile(join(f.cwd, "after-uncertain.txt")));
+  assert.equal(await readFile(join(f.cwd, "mcp-calls.txt"), "utf8"), "called");
+  assert.equal(f.received.length, 1);
+  await assertMcpStopped(f.cwd);
+});
+
 test("built-in Codemode requires opt-in and preserves MCP permissions", async (t) => {
   const f = await mcpFixture(t, "codemode", true);
   f.definition.configuration.resources.codemode = true;

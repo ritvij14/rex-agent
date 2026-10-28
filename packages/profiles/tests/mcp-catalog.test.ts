@@ -8,6 +8,43 @@ const entry = () => ({
   tools: ["read-file"],
 });
 
+test("MCP exposure is bounded operator metadata and omission preserves default serialization", () => {
+  const plain = profiles.parseLocalMcpCatalog([entry()])[0]!;
+  assert.equal(Object.hasOwn(plain, "exposure"), false);
+  for (const exposure of ["direct", "codemode", "deferred"]) {
+    const catalog = profiles.parseLocalMcpCatalog([{ ...entry(), exposure }]);
+    assert.equal(catalog[0]!.exposure, exposure);
+    assert.ok(Object.isFrozen(catalog[0]));
+    assert.deepEqual(
+      profiles.localMcpToolNames(catalog),
+      profiles.localMcpToolNames([plain]),
+    );
+  }
+  for (const exposure of [
+    null,
+    true,
+    "hidden",
+    "model-only",
+    "eager",
+    "deferred ",
+    undefined,
+  ])
+    assert.throws(
+      () => profiles.parseLocalMcpCatalog([{ ...entry(), exposure }]),
+      (error) =>
+        error instanceof profiles.ProfileError &&
+        error.code === "INVALID_MCP_CATALOG",
+    );
+  const inherited = Object.assign(
+    Object.create({ exposure: "deferred" }),
+    entry(),
+  );
+  assert.equal(
+    profiles.parseLocalMcpCatalog([inherited])[0]!.exposure,
+    undefined,
+  );
+});
+
 test("Codemode is an explicit frozen boolean resource selection, not a file or grant", () => {
   const shared = profiles.parseSharedConfiguration({
     version: 2,

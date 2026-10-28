@@ -20,6 +20,8 @@ RUN npm ci --ignore-scripts --omit=dev --no-audit --no-fund --cache /tmp/rex-npm
 COPY transport.ts configure.ts runtime.ts verify.ts provision.ts /opt/rex/
 COPY fixture-extension.mjs /opt/rex/operator-extensions/fixture.mjs
 COPY fixture-mcp.mjs /opt/rex/operator-mcp/fixture.mjs
+COPY fixture-mcp.mjs /opt/rex/operator-mcp/discovery.mjs
+COPY fixture-mcp.mjs /opt/rex/operator-mcp/uncertain.mjs
 COPY profiles/ /profiles/
 COPY pi.sh /usr/local/bin/pi
 RUN chmod 755 /usr/local/bin/pi

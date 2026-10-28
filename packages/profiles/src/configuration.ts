@@ -782,6 +782,7 @@ export interface LocalMcpServer {
   readonly tools: readonly string[];
   readonly args: readonly string[];
   readonly resources: boolean;
+  readonly exposure?: "direct" | "codemode" | "deferred";
 }
 
 function mcpServerToolNames(entry: LocalMcpServer) {
@@ -817,7 +818,14 @@ export function parseLocalMcpCatalog(
         ["id", "sha256", "tools"].some((key) => !Object.hasOwn(entry, key)) ||
         Object.keys(entry).some(
           (key) =>
-            !["id", "sha256", "tools", "args", "resources"].includes(key),
+            ![
+              "id",
+              "sha256",
+              "tools",
+              "args",
+              "resources",
+              "exposure",
+            ].includes(key),
         ) ||
         typeof entry.id !== "string" ||
         entry.id.length > 64 ||
@@ -836,7 +844,11 @@ export function parseLocalMcpCatalog(
             !/^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(tool),
         ) ||
         (Object.hasOwn(entry, "resources") &&
-          typeof entry.resources !== "boolean")
+          typeof entry.resources !== "boolean") ||
+        (Object.hasOwn(entry, "exposure") &&
+          !["direct", "codemode", "deferred"].includes(
+            entry.exposure as string,
+          ))
       )
         throw new ProfileError("INVALID_MCP_CATALOG");
       const args = Object.hasOwn(entry, "args") ? entry.args : [];
@@ -859,6 +871,9 @@ export function parseLocalMcpCatalog(
         tools: Object.freeze([...(entry.tools as string[])]),
         args: Object.freeze([...(args as string[])]),
         resources: entry.resources === true,
+        ...(Object.hasOwn(entry, "exposure")
+          ? { exposure: entry.exposure as LocalMcpServer["exposure"] }
+          : {}),
       });
       for (const name of mcpServerToolNames(parsed)) {
         if (name.length > 64 || names.has(name))
