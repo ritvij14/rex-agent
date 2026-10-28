@@ -236,6 +236,7 @@ export interface SharedConfiguration {
   readonly models?: readonly CatalogModel[];
   readonly extensionCatalog?: readonly ExtensionCatalogEntry[];
   readonly localMcpCatalog?: readonly LocalMcpServer[];
+  readonly remoteMcpCatalog?: readonly RemoteMcpServer[];
   readonly resourceFiles?: readonly ResourceFile[];
   readonly soul?: string;
   readonly model?: ModelReference;
@@ -455,12 +456,13 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
   }
   const keys = Object.keys(value);
   if (
-    keys.length > 9 ||
+    keys.length > 10 ||
     keys.some(
       (key) =>
         !(
           key === "extensionCatalog" ||
           key === "localMcpCatalog" ||
+          key === "remoteMcpCatalog" ||
           key === "resources" ||
           key === "limits" ||
           key === "models" ||
@@ -478,6 +480,7 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
     models?: readonly CatalogModel[];
     extensionCatalog?: readonly ExtensionCatalogEntry[];
     localMcpCatalog?: readonly LocalMcpServer[];
+    remoteMcpCatalog?: readonly RemoteMcpServer[];
     model?: ModelReference;
     tools?: ToolPolicy;
     limits?: TurnLimits;
@@ -487,6 +490,8 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
   try {
     if (Object.hasOwn(value, "localMcpCatalog"))
       parsed.localMcpCatalog = parseLocalMcpCatalog(value.localMcpCatalog);
+    if (Object.hasOwn(value, "remoteMcpCatalog"))
+      parsed.remoteMcpCatalog = parseRemoteMcpCatalog(value.remoteMcpCatalog);
     if (Object.hasOwn(value, "resources"))
       parsed.resources = parseResourceConfiguration(value.resources);
     if (Object.hasOwn(value, "model"))
@@ -537,7 +542,18 @@ export function parseSharedConfiguration(value: unknown): SharedConfiguration {
       }),
     );
   }
-  const mcpNames = localMcpToolNames(parsed.localMcpCatalog ?? []);
+  const mcpNames = localMcpToolNames([
+    ...(parsed.localMcpCatalog ?? []),
+    ...(parsed.remoteMcpCatalog ?? []),
+  ]);
+  if (
+    parsed.localMcpCatalog &&
+    parsed.remoteMcpCatalog &&
+    parsed.localMcpCatalog.some((entry) =>
+      parsed.remoteMcpCatalog!.some((remote) => remote.id === entry.id),
+    )
+  )
+    throw new ProfileError("INVALID_SHARED_CONFIGURATION");
   if (
     parsed.extensionCatalog?.some((entry) =>
       entry.tools.some((name) => mcpNames.includes(name)),
@@ -655,10 +671,14 @@ export function resolveEffectiveProfile(
     ]
       .filter((text) => text !== undefined)
       .join("\n\n");
-    const mcpServers = selectLocalMcpServers(shared?.localMcpCatalog, [
-      ...(shared?.resources?.mcp ?? []),
-      ...((profile.configuration?.resources ?? profile.resources)?.mcp ?? []),
-    ]);
+    const mcpServers = selectMcpServers(
+      shared?.localMcpCatalog,
+      shared?.remoteMcpCatalog,
+      [
+        ...(shared?.resources?.mcp ?? []),
+        ...((profile.configuration?.resources ?? profile.resources)?.mcp ?? []),
+      ],
+    );
     const blacklist = [
       ...(tools?.blacklist ?? []),
       ...(shared?.tools?.blacklist ?? []),
@@ -785,13 +805,19 @@ export interface LocalMcpServer {
   readonly exposure?: "direct" | "codemode" | "deferred";
 }
 
-function mcpServerToolNames(entry: LocalMcpServer) {
+function mcpServerToolNames(entry: { id: string; tools: readonly string[] }) {
   return entry.tools.map((tool) =>
     `mcp__${entry.id}__${tool}`.replace(/[^A-Za-z0-9_]/g, "_"),
   );
 }
 
-export function localMcpToolNames(catalog: readonly LocalMcpServer[]) {
+export function localMcpToolNames(
+  catalog: readonly {
+    id: string;
+    tools: readonly string[];
+    resources?: boolean;
+  }[],
+) {
   return Object.freeze([
     ...catalog.flatMap(mcpServerToolNames),
     ...(catalog.some((entry) => entry.resources)
@@ -895,6 +921,174 @@ export function selectLocalMcpServers(
   return Object.freeze(
     selected.map((id) => {
       const entry = catalog?.find((entry) => entry.id === id);
+      if (!entry) throw new ProfileError("INVALID_MCP_CATALOG");
+      return entry;
+    }),
+  );
+}
+
+export interface RemoteMcpServer {
+  readonly id: string;
+  readonly url: string;
+  readonly tools: readonly string[];
+  readonly resources: boolean;
+  readonly exposure?: "direct" | "codemode" | "deferred";
+  readonly credential?: { readonly header: string; readonly env: string };
+  readonly privateNetwork: boolean;
+  readonly caCertificate?: string;
+}
+
+const toolList = (tools: unknown): readonly string[] | undefined => {
+  if (
+    !Array.isArray(tools) ||
+    tools.length < 1 ||
+    tools.length > 32 ||
+    tools.some(
+      (tool) =>
+        typeof tool !== "string" ||
+        tool !== tool.trim() ||
+        !/^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(tool),
+    ) ||
+    new Set(tools).size !== tools.length
+  )
+    return undefined;
+  return Object.freeze([...tools]);
+};
+
+const remoteUrl = (value: unknown): string | undefined => {
+  if (
+    typeof value !== "string" ||
+    value !== value.trim() ||
+    Buffer.byteLength(value) > 2048
+  )
+    return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !url.hostname ||
+    url.pathname === "/"
+  )
+    return undefined;
+  return url.href;
+};
+
+export function parseRemoteMcpCatalog(
+  value: unknown,
+): readonly RemoteMcpServer[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8)
+    throw new ProfileError("INVALID_MCP_CATALOG");
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  return Object.freeze(
+    value.map((entry: unknown) => {
+      if (
+        !isPlainObject(entry) ||
+        ["id", "url", "tools"].some((key) => !Object.hasOwn(entry, key)) ||
+        Object.keys(entry).some(
+          (key) =>
+            ![
+              "id",
+              "url",
+              "tools",
+              "resources",
+              "exposure",
+              "credential",
+              "privateNetwork",
+              "caCertificate",
+            ].includes(key),
+        ) ||
+        typeof entry.id !== "string" ||
+        entry.id.length > 64 ||
+        !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(entry.id) ||
+        entry.id !== entry.id.trim() ||
+        ids.has(entry.id) ||
+        !toolList(entry.tools)
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      const url = remoteUrl(entry.url);
+      if (!url) throw new ProfileError("INVALID_MCP_CATALOG");
+      if (
+        Object.hasOwn(entry, "resources") &&
+        typeof entry.resources !== "boolean"
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      if (
+        Object.hasOwn(entry, "privateNetwork") &&
+        typeof entry.privateNetwork !== "boolean"
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      if (
+        Object.hasOwn(entry, "exposure") &&
+        !["direct", "codemode", "deferred"].includes(entry.exposure as string)
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      let credential: RemoteMcpServer["credential"];
+      if (Object.hasOwn(entry, "credential")) {
+        const value = entry.credential;
+        if (
+          !isPlainObject(value) ||
+          !objectWithKeys(value, ["header", "env"]) ||
+          typeof value.header !== "string" ||
+          !/^[A-Za-z][A-Za-z0-9-]{0,63}$/.test(value.header) ||
+          typeof value.env !== "string" ||
+          !/^[A-Z][A-Z0-9_]{0,63}$/.test(value.env)
+        )
+          throw new ProfileError("INVALID_MCP_CATALOG");
+        credential = Object.freeze({ header: value.header, env: value.env });
+      }
+      if (
+        Object.hasOwn(entry, "caCertificate") &&
+        (typeof entry.caCertificate !== "string" ||
+          !entry.caCertificate.includes("-----BEGIN CERTIFICATE-----") ||
+          Buffer.byteLength(entry.caCertificate) > 16384)
+      )
+        throw new ProfileError("INVALID_MCP_CATALOG");
+      const parsed = Object.freeze({
+        id: entry.id,
+        url,
+        tools: toolList(entry.tools)!,
+        resources: entry.resources === true,
+        ...(Object.hasOwn(entry, "exposure")
+          ? { exposure: entry.exposure as RemoteMcpServer["exposure"] }
+          : {}),
+        ...(credential ? { credential } : {}),
+        privateNetwork: entry.privateNetwork === true,
+        ...(Object.hasOwn(entry, "caCertificate")
+          ? { caCertificate: entry.caCertificate as string }
+          : {}),
+      });
+      for (const name of mcpServerToolNames(parsed)) {
+        if (name.length > 64 || names.has(name))
+          throw new ProfileError("INVALID_MCP_CATALOG");
+        names.add(name);
+      }
+      ids.add(parsed.id);
+      return parsed;
+    }),
+  );
+}
+
+export function selectMcpServers(
+  local: readonly LocalMcpServer[] | undefined,
+  remote: readonly RemoteMcpServer[] | undefined,
+  ids: readonly string[],
+) {
+  const selected = [...new Set(ids)];
+  if (selected.length > 8) throw new ProfileError("INVALID_MCP_CATALOG");
+  return Object.freeze(
+    selected.map((id) => {
+      const entry =
+        local?.find((entry) => entry.id === id) ??
+        remote?.find((entry) => entry.id === id);
       if (!entry) throw new ProfileError("INVALID_MCP_CATALOG");
       return entry;
     }),

@@ -26,9 +26,12 @@ import { ProfileError } from "./errors.ts";
 export { ProfileError, type ProfileErrorCode } from "./errors.ts";
 export {
   parseLocalMcpCatalog,
+  parseRemoteMcpCatalog,
+  selectMcpServers,
   localMcpToolNames,
   selectLocalMcpServers,
   type LocalMcpServer,
+  type RemoteMcpServer,
   DEFAULT_TURN_LIMITS,
   validateResourceFiles,
   resourcePaths,

@@ -24,6 +24,7 @@ import {
   ProfileError,
   ProfileRuntime,
   resolveEffectiveProfile,
+  type LocalMcpServer,
   type SharedConfiguration,
 } from "@rex/profiles";
 import { createProposal } from "./proposals.ts";
@@ -543,7 +544,9 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
           );
         }
         mcp = await openLocalMcp(
-          effective.mcpServers ?? [],
+          (effective.mcpServers ?? []).filter(
+            (server): server is LocalMcpServer => !Object.hasOwn(server, "url"),
+          ),
           options.installedMcpRoot,
           options.cwd.trim(),
           agentDir,

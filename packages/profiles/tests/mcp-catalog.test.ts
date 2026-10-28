@@ -92,6 +92,161 @@ test("Codemode is an explicit frozen boolean resource selection, not a file or g
     );
 });
 
+test("remote MCP catalog requires explicit fixed HTTPS selection metadata", () => {
+  assert.equal(typeof profiles.parseRemoteMcpCatalog, "function");
+  const remote = () => ({
+    id: "hosted-docs",
+    url: "https://mcp.example.test/mcp",
+    tools: ["search"],
+  });
+  const catalog = profiles.parseRemoteMcpCatalog([remote()]);
+  assert.ok(Object.isFrozen(catalog));
+  assert.ok(Object.isFrozen(catalog[0]));
+  assert.ok(Object.isFrozen(catalog[0]!.tools));
+  assert.deepEqual(
+    profiles.localMcpToolNames([
+      { ...profiles.parseLocalMcpCatalog([entry()])[0]! },
+      catalog[0]!,
+    ]),
+    ["mcp__local_docs__read_file", "mcp__hosted_docs__search"],
+  );
+  const full = profiles.parseRemoteMcpCatalog([
+    {
+      ...remote(),
+      resources: true,
+      exposure: "deferred",
+      privateNetwork: true,
+      credential: { header: "X-Rex-Access", env: "REX_MCP_DOCS_TOKEN" },
+      caCertificate:
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+    },
+  ])[0]!;
+  assert.equal(full.resources, true);
+  assert.equal(full.exposure, "deferred");
+  assert.equal(full.privateNetwork, true);
+  assert.deepEqual(full.credential, {
+    header: "X-Rex-Access",
+    env: "REX_MCP_DOCS_TOKEN",
+  });
+  assert.ok(full.caCertificate!.includes("BEGIN CERTIFICATE"));
+  const combined = profiles.parseSharedConfiguration({
+    version: 2,
+    model: { provider: "cli-proxy", id: "synthetic-model" },
+    localMcpCatalog: [{ ...entry(), id: "first" }],
+    remoteMcpCatalog: [{ ...remote(), id: "second" }],
+    extensionCatalog: [{ id: "ext", sha256: "a".repeat(64), tools: ["other"] }],
+  });
+  const selected = profiles.resolveEffectiveProfile(
+    {
+      id: "coding",
+      home: "",
+      soul: "Synthetic.",
+      resources: { mcp: ["first", "second"] },
+    },
+    combined,
+  );
+  assert.deepEqual(
+    selected.mcpServers?.map((server) => [
+      server.id,
+      Object.hasOwn(server, "url"),
+    ]),
+    [
+      ["first", false],
+      ["second", true],
+    ],
+  );
+  assert.throws(() =>
+    profiles.resolveEffectiveProfile(
+      {
+        id: "coding",
+        home: "",
+        soul: "Synthetic.",
+        resources: { mcp: ["missing"] },
+      },
+      combined,
+    ),
+  );
+  assert.throws(() =>
+    profiles.parseSharedConfiguration({
+      version: 2,
+      localMcpCatalog: [{ ...entry(), id: "same" }],
+      remoteMcpCatalog: [{ ...remote(), id: "same" }],
+    }),
+  );
+  assert.throws(() =>
+    profiles.parseSharedConfiguration({
+      version: 2,
+      remoteMcpCatalog: [{ ...remote(), id: "shadow" }],
+      extensionCatalog: [
+        { id: "ext", sha256: "a".repeat(64), tools: ["mcp__shadow__search"] },
+      ],
+    }),
+  );
+  for (const value of [
+    null,
+    {},
+    [],
+    [remote(), remote()],
+    [{ ...remote(), id: "../outside" }],
+    [{ ...remote(), url: "http://mcp.example.test/mcp" }],
+    [
+      {
+        ...remote(),
+        // UserInfo must fail closed; the scanner does not run on runtime strings.
+        url: Object.assign(new URL("https://mcp.example.test/mcp"), {
+          username: "user",
+          password: "pass",
+        }).href,
+      },
+    ],
+    [{ ...remote(), url: "https://mcp.example.test/mcp?x=1" }],
+    [{ ...remote(), url: "https://mcp.example.test/mcp#f" }],
+    [{ ...remote(), url: "https:///mcp" }],
+    [{ ...remote(), url: "https://mcp.example.test" }],
+    [{ ...remote(), url: `https://mcp.example.test/${"x".repeat(2048)}` }],
+    [{ ...remote(), url: 1 }],
+    [{ ...remote(), tools: [] }],
+    [{ ...remote(), tools: ["search", "search"] }],
+    [{ ...remote(), tools: ["*"] }],
+    [{ ...remote(), resources: "yes" }],
+    [{ ...remote(), exposure: "hidden" }],
+    [{ ...remote(), credential: { header: "bad header", env: "REX" } }],
+    [{ ...remote(), credential: { header: "X-Rex", env: "lower" } }],
+    [{ ...remote(), credential: { header: "X-Rex" } }],
+    [
+      {
+        ...remote(),
+        credential: { header: "X-Rex", env: "REX", token: "synthetic-secret" },
+      },
+    ],
+    [{ ...remote(), privateNetwork: "yes" }],
+    [{ ...remote(), caCertificate: "" }],
+    [{ ...remote(), caCertificate: "not a certificate" }],
+    [
+      {
+        ...remote(),
+        caCertificate: "-----BEGIN CERTIFICATE-----\n" + "x".repeat(16384),
+      },
+    ],
+    [Object.create(remote())],
+  ])
+    assert.throws(
+      () => profiles.parseRemoteMcpCatalog(value),
+      (error) => {
+        assert.ok(error instanceof profiles.ProfileError);
+        assert.equal(error.code, "INVALID_MCP_CATALOG");
+        assert.equal(error.message, "Local MCP catalog is invalid.");
+        return true;
+      },
+    );
+  const omitted = profiles.parseSharedConfiguration({
+    version: 2,
+    model: { provider: "cli-proxy", id: "synthetic-model" },
+    localMcpCatalog: [entry()],
+  });
+  assert.equal(Object.hasOwn(omitted, "remoteMcpCatalog"), false);
+});
+
 test("MCP resolution unions required shared selections and rejects unknown IDs", () => {
   const shared = profiles.parseSharedConfiguration({
     version: 2,
