@@ -7,11 +7,14 @@ import { isMain, ROOT } from "./repo-check.ts";
 import { parseProfileRequest, validateProfileId } from "@rex/profiles";
 import {
   NODE,
+  operatorExport,
+  operatorImport,
+  operatorInspect,
+  operatorProfileCommand,
   parseRexInput,
   readRexInput,
-  runProfileWorker,
-  operatorProfileCommand,
   requireSuccess,
+  runProfileWorker,
 } from "./profile-worker.ts";
 import {
   checkProfileAcceptance,
@@ -293,6 +296,37 @@ export function main(args: string[]): number {
         rest[1],
       );
       process.stdout.write(requireSuccess(result) + "\n");
+    } else if (
+      (command === "list-profiles" && !rest.length) ||
+      ((command === "show-profile" ||
+        command === "validate-profile" ||
+        command === "effective-profile") &&
+        rest.length === 1)
+    ) {
+      const id = rest[0];
+      if (id !== undefined) validateProfileId(id);
+      const action =
+        command === "list-profiles"
+          ? "list"
+          : command === "show-profile"
+            ? "show"
+            : command === "validate-profile"
+              ? "validate"
+              : "effective";
+      process.stdout.write(operatorInspect(PROJECT, action, id) + "\n");
+    } else if (
+      (command === "export-profiles" || command === "import-profiles") &&
+      rest.length === 1
+    ) {
+      const archive = rest[0]!;
+      if (
+        !archive.trim() ||
+        /\s|[\x00-\x1f]/.test(archive) ||
+        archive.length > 512
+      )
+        throw new Error("Provide one plain archive path without whitespace.");
+      if (command === "export-profiles") operatorExport(PROJECT, archive);
+      else process.stdout.write(operatorImport(PROJECT, archive) + "\n");
     } else if (command === "configure" && rest.length === 2) {
       modelConfiguration(rest[0]!, rest[1]!);
       compose(PROJECT, false, [
@@ -306,7 +340,7 @@ export function main(args: string[]): number {
       ]);
     } else {
       console.log(
-        "Usage: npm run sandbox -- build|start|refresh|stop|shell|pi|rex|check|review-profile ID|approve-profile ID DIGEST|review-update ID|approve-update ID DIGEST|configure MODEL_ID API|reset --confirm",
+        "Usage: npm run sandbox -- build|start|refresh|stop|shell|pi|rex|check|list-profiles|show-profile ID|validate-profile ID|effective-profile ID|export-profiles ARCHIVE|import-profiles ARCHIVE|review-profile ID|approve-profile ID DIGEST|review-update ID|approve-update ID DIGEST|configure MODEL_ID API|reset --confirm",
       );
       return 1;
     }
