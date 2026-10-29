@@ -399,3 +399,19 @@ test("the pinned scanner blocks generated tokens without printing them", () => {
   assert.equal(result, false);
   assert.ok(!output.includes(token));
 });
+
+test("agent memory working files stay untracked and outside publication rules", (t) => {
+  const repo = makeRepo(t);
+  assert.ok(
+    pathProblems("SCRATCHPAD.md").includes("path not approved for publication"),
+  );
+  assert.ok(
+    pathProblems("MEMORY.md").includes("path not approved for publication"),
+  );
+  repo.write(".gitignore", "SCRATCHPAD.md\nMEMORY.md\n");
+  repo.write("SCRATCHPAD.md", "working note\n");
+  repo.write("MEMORY.md", "durable note\n");
+  const { entries, problems } = snapshot(repo.root, "worktree");
+  assert.deepEqual(entries.map(([name]) => name).sort(), [".gitignore"]);
+  assert.deepEqual(problems, []);
+});
