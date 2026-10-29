@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 
@@ -77,6 +77,33 @@ function validateRoot(root: string): string {
     throw new ProfileError("INVALID_PROFILES_ROOT");
   }
   return root.trim();
+}
+
+/** Operator enumeration of the private root: IDs only, no contents. */
+export async function listProfiles(profilesRoot: string): Promise<string[]> {
+  const root = validateRoot(profilesRoot);
+  try {
+    const home = await realpath(root);
+    const entries = await readdir(home, { withFileTypes: true });
+    const ids: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory())
+        throw new ProfileError("INVALID_PROFILE_DEFINITION");
+      validateProfileId(entry.name);
+      const files = await readdir(join(home, entry.name));
+      if (!files.includes("profile.json") && !files.includes("SOUL.md")) {
+        throw new ProfileError("INVALID_PROFILE_DEFINITION");
+      }
+      ids.push(entry.name);
+    }
+    return ids.sort();
+  } catch (error) {
+    if (error instanceof ProfileError) throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ProfileError("INVALID_PROFILES_ROOT");
+    }
+    throw new ProfileError("INVALID_PROFILES_ROOT");
+  }
 }
 
 async function readBounded(

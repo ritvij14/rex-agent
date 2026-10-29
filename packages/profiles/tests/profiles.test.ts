@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import {
+  listProfiles,
   lookupProfile,
   ProfileError,
   ProfileRuntime,
@@ -470,5 +471,41 @@ test("turns leave the process environment and working directory unchanged", asyn
     result.status,
     0,
     "Isolated process must preserve its environment and cwd",
+  );
+});
+
+test("listProfiles returns sorted profile IDs and rejects roots and entries that cannot be profiles", async (t) => {
+  const { root, profile } = await fixture(t);
+  assert.deepEqual(await listProfiles(root), []);
+  await profile("profile-b");
+  await profile("profile-a");
+  const home = join(root, "soul-only");
+  await mkdir(home);
+  await writeFile(join(home, "SOUL.md"), "soul-only");
+  assert.deepEqual(await listProfiles(root), [
+    "profile-a",
+    "profile-b",
+    "soul-only",
+  ]);
+  await assert.rejects(
+    () => listProfiles(join(root, "nonexistent")),
+    errorCode("INVALID_PROFILES_ROOT"),
+  );
+  // A directory that is itself a profile home is not a profiles root; entries
+  // that are not valid profile directories fail closed.
+  await assert.rejects(
+    () => listProfiles(join(root, "profile-a")),
+    errorCode("INVALID_PROFILE_DEFINITION"),
+  );
+  await mkdir(join(root, "broken"));
+  await assert.rejects(
+    () => listProfiles(root),
+    errorCode("INVALID_PROFILE_DEFINITION"),
+  );
+  await rm(join(root, "broken"), { recursive: true });
+  await symlink("/etc", join(root, "broken"));
+  await assert.rejects(
+    () => listProfiles(root),
+    errorCode("INVALID_PROFILE_DEFINITION"),
   );
 });
