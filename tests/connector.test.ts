@@ -205,7 +205,7 @@ test("connector denies loopback, link-local and private ranges by policy", async
   const resolver = await fixture(
     t,
     baseEndpoint({
-      testAllowLoopback: true,
+      testAllowLoopback: false,
       url: "https://localhost:PORT/mcp",
     }),
   );

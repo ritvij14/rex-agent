@@ -191,6 +191,9 @@ export function runProfileWorker(options: {
     }[];
     internal?: boolean;
   };
+  // Trusted-caller override for the inference socket volume, e.g. an existing
+  // gateway's volume for operator-side live QA; only validated names accepted.
+  socketVolume?: string;
 }) {
   validateProfileId(options.profile);
   if (!options.command) {
@@ -200,6 +203,11 @@ export function runProfileWorker(options: {
   }
   return withProfileLock(options.project, options.profile, () => {
     const volumes = workerVolumes(options.project, options.profile);
+    if (options.socketVolume !== undefined) {
+      if (!/^[a-z0-9][a-z0-9_.-]{0,100}$/.test(options.socketVolume))
+        throw new Error("Invalid socket volume.");
+      volumes.socket = options.socketVolume;
+    }
     // Docker seeds a new master volume from the public image once; existing data is never replaced.
     requireSuccess(
       docker([
