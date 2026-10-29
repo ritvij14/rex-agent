@@ -7,7 +7,9 @@
 !runtime.ts
 !verify.ts
 !provision.ts
+!connector.ts
 !fixture-extension.mjs
+!fixture-remote.mjs
 !fixture-mcp.mjs
 !pi.sh
 !profiles/

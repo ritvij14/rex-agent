@@ -17,11 +17,12 @@ RUN npm ci --ignore-scripts --omit=dev --no-audit --no-fund --cache /tmp/rex-npm
     && ln -s lab/terminal/node_modules /opt/rex/node_modules \
     && mkdir -p /workspace /state /run/rex /profiles /proposals \
     && chown node:node /workspace /state /run/rex /proposals
-COPY transport.ts configure.ts runtime.ts verify.ts provision.ts /opt/rex/
+COPY transport.ts configure.ts runtime.ts verify.ts provision.ts connector.ts /opt/rex/
 COPY fixture-extension.mjs /opt/rex/operator-extensions/fixture.mjs
 COPY fixture-mcp.mjs /opt/rex/operator-mcp/fixture.mjs
 COPY fixture-mcp.mjs /opt/rex/operator-mcp/discovery.mjs
 COPY fixture-mcp.mjs /opt/rex/operator-mcp/uncertain.mjs
+COPY fixture-remote.mjs /opt/rex/fixture-remote.mjs
 COPY profiles/ /profiles/
 COPY pi.sh /usr/local/bin/pi
 RUN chmod 755 /usr/local/bin/pi

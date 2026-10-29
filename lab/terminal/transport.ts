@@ -4,8 +4,12 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import net from "node:net";
 
 export const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const REQUEST_TIMEOUT = 120_000;
 const REQUEST_HEADERS = [
   "content-type",
   "accept",
@@ -170,4 +174,75 @@ export function createRelay(socketPath: string) {
       forward(req, res, { socketPath }, headers);
     }),
   );
+}
+const CONNECTOR_HEADERS = [
+  ...REQUEST_HEADERS,
+  "mcp-session-id",
+  "mcp-protocol-version",
+  "last-event-id",
+];
+
+// Worker-side router: `<id>/...` maps to the fixed connector socket volume.
+// A raw byte proxy on both sides avoids any structured http layer between the
+// worker and the connector; only the request line is rewritten.
+export function createRouter(port: number, connectorsDir: string) {
+  return net.createServer((client) => {
+    let buffered = Buffer.alloc(0);
+    let upstream: net.Socket | undefined;
+    client.on("data", (chunk: Buffer) => {
+      if (upstream) {
+        upstream.write(chunk);
+        return;
+      }
+      buffered = Buffer.concat([buffered, chunk]);
+      const boundary = buffered.indexOf("\r\n\r\n");
+      if (boundary < 0) {
+        if (buffered.length > 65536) client.destroy();
+        return;
+      }
+      const head = buffered.slice(0, boundary).toString("latin1");
+      const lines = head.split("\r\n");
+      const parts = (lines[0] ?? "").split(" ");
+      const id = (parts[1] ?? "").split("/")[1] ?? "";
+      const socket = join(connectorsDir, `${id}.sock`);
+      if (
+        parts.length < 3 ||
+        !/^[\w-]{1,64}$/.test(id) ||
+        !existsSync(socket) ||
+        !statSync(socket).isSocket()
+      ) {
+        client.end(
+          "HTTP/1.1 404 Unknown connector\r\nConnection: close\r\n\r\n",
+        );
+        return;
+      }
+      client.pause();
+      buffered = buffered.slice(boundary + 4);
+      upstream = net.createConnection(socket);
+      upstream.on("connect", () => {
+        upstream!.write(
+          `${parts[0]} ${(parts[1] ?? "/").slice(id.length + 1) || "/"} ${parts[2]}\r\n${lines.slice(1).join("\r\n")}\r\n\r\n`,
+          "latin1",
+        );
+        if (buffered.length) {
+          upstream!.write(buffered);
+          buffered = Buffer.alloc(0);
+        }
+        client.resume();
+      });
+      upstream.on("data", (answer: Buffer) => {
+        client.write(answer);
+      });
+      upstream.on("end", () => client.end());
+      upstream.on("error", () => {
+        client.end(
+          "HTTP/1.1 502 Connector connection unavailable\r\nConnection: close\r\n\r\n",
+        );
+      });
+      upstream.on("close", () => client.end());
+      client.on("close", () => upstream?.destroy());
+      client.on("error", () => upstream?.destroy());
+    });
+    client.on("error", () => upstream?.destroy());
+  });
 }

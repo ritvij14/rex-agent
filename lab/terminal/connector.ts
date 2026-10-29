@@ -160,7 +160,16 @@ export function startConnector(spec: ConnectorEndpoint): {
           0,
         );
       }
-      callback(null, list[0]!.address, list[0]!.family);
+      callback(
+        null,
+        _options.all
+          ? list.map((address) => ({
+              address: address.address,
+              family: address.family,
+            }))
+          : (list[0]!.address as string),
+        _options.all ? undefined : list[0]!.family,
+      );
     });
   };
   const server = harden(
@@ -208,35 +217,32 @@ export function startConnector(spec: ConnectorEndpoint): {
           lookup,
           timeout: REQUEST_TIMEOUT_MS,
         };
-        const outgoing = httpsRequest(
-          options,
-          (response) => {
-            const status = response.statusCode ?? 502;
-            if (status >= 300 && status < 400) {
+        const outgoing = httpsRequest(options, (response) => {
+          const status = response.statusCode ?? 502;
+          if (status >= 300 && status < 400) {
+            response.destroy();
+            return respond(res, 502, "Remote MCP redirects are refused.");
+          }
+          const contentType = response.headers["content-type"];
+          res.writeHead(status, {
+            ...(contentType ? { "content-type": contentType } : {}),
+          });
+          let sent = 0;
+          response.on("data", (chunk: Buffer) => {
+            sent += chunk.length;
+            if (sent > MAX_RESPONSE_BYTES) {
               response.destroy();
-              return respond(res, 502, "Remote MCP redirects are refused.");
+              outgoing.destroy();
+              res.destroy();
             }
-            const contentType = response.headers["content-type"];
-            res.writeHead(status, {
-              ...(contentType ? { "content-type": contentType } : {}),
-            });
-            let sent = 0;
-            response.on("data", (chunk: Buffer) => {
-              sent += chunk.length;
-              if (sent > MAX_RESPONSE_BYTES) {
-                response.destroy();
-                outgoing.destroy();
-                res.destroy();
-              }
-            });
-            response.on("error", () => res.destroy());
-            response.pipe(res);
-          },
-        );
+          });
+          response.on("error", () => res.destroy());
+          response.pipe(res);
+        });
         outgoing.on("timeout", () => outgoing.destroy());
-        outgoing.on("error", () =>
-          respond(res, 502, "Remote MCP connection unavailable."),
-        );
+        outgoing.on("error", (error) => {
+          respond(res, 502, "Remote MCP connection unavailable.");
+        });
         res.on("close", () => outgoing.destroy());
         outgoing.end(body);
       });
@@ -275,10 +281,17 @@ export function startConnectors(specs: ConnectorEndpoint[]) {
   };
 }
 
-if (process.argv[1]?.endsWith("connector.ts") && process.argv[2]) {
-  const spec = JSON.parse(
-    readFileSync(process.argv[2], "utf8"),
-  ) as ConnectorSpecFile;
+if (process.argv[1]?.endsWith("connector.ts")) {
+  if (process.argv[2]) {
+    start(
+      JSON.parse(readFileSync(process.argv[2], "utf8")) as ConnectorSpecFile,
+    );
+  } else {
+    start(JSON.parse(readFileSync(0, "utf8")) as ConnectorSpecFile);
+  }
+}
+
+function start(spec: ConnectorSpecFile) {
   if (!Array.isArray(spec.endpoints) || !spec.endpoints.length) {
     throw new Error("Connector specification requires endpoints.");
   }

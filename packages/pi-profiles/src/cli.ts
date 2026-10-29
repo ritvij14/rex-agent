@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { parseProfileArguments, parseProfileRequest } from "@rex/profiles";
 import { IncompleteProfileResponseError, runProfileRequest } from "./index.ts";
 
@@ -38,6 +38,11 @@ async function main() {
     modelOverride,
     installedExtensionsRoot: "/opt/rex/operator-extensions",
     installedMcpRoot: "/opt/rex/operator-mcp",
+    remoteMcpOrigin: (
+      await stat("/run/connectors").catch(() => null)
+    )?.isDirectory()
+      ? "http://127.0.0.1:8400"
+      : undefined,
   });
   console.log(`[profile=${result.profileId} model=${result.model}]`);
   if (result.attempts.length > 1)

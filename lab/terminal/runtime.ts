@@ -1,8 +1,16 @@
-import { chmodSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { configure } from "./configure.ts";
-import { createGateway, createRelay } from "./transport.ts";
+import { createGateway, createRelay, createRouter } from "./transport.ts";
+
+const connectorsDir = "/run/connectors";
 
 const socket = "/run/rex/inference.sock";
 const mode = process.argv[2];
@@ -38,6 +46,10 @@ async function main() {
       relay.once("listening", () => resolve());
       relay.once("error", reject);
     });
+    let router: { close(cb?: () => void): void } | undefined;
+    if (existsSync(connectorsDir) && readdirSync(connectorsDir).length) {
+      router = createRouter(8400, connectorsDir).listen(8400, "127.0.0.1");
+    }
     try {
       const child = spawn(
         process.execPath,
@@ -56,6 +68,9 @@ async function main() {
     } finally {
       relay.closeAllConnections();
       relay.close();
+      if (router) {
+        router.close();
+      }
     }
   } else if (mode === "fixture") {
     createServer(async (req, res) => {
@@ -206,6 +221,19 @@ async function main() {
           "synthetic-codemode-disabled": {
             name: "codemode",
             args: { code: "text('SHOULD_NOT_EXECUTE')" },
+            failed: true,
+          },
+          "synthetic-remote-inspect": {
+            name: "mcp__remote_docs__inspect",
+            args: {},
+          },
+          "synthetic-remote-read": {
+            name: "read_mcp_resource",
+            args: { server: "remote-docs", uri: "remote://evidence" },
+          },
+          "synthetic-remote-denied": {
+            name: "mcp__remote_docs__mutate",
+            args: {},
             failed: true,
           },
           "synthetic-mcp-resource-list": {

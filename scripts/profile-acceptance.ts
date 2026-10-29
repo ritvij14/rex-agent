@@ -1,4 +1,15 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   docker,
   IMAGE,
@@ -22,6 +33,7 @@ const profiles = [
   "mcp-check",
   "discovery-check",
   "uncertain-check",
+  "remote-check",
   "synthetic-helper",
 ];
 
@@ -71,13 +83,14 @@ export function checkProfileAcceptance(project: string) {
     IMAGE,
     "-e",
     `const f=require('node:fs'),crypto=require('node:crypto'); const extensionHash=crypto.createHash('sha256').update(f.readFileSync('/opt/rex/operator-extensions/fixture.mjs')).digest('hex'); const mcpHash=crypto.createHash('sha256').update(f.readFileSync('/opt/rex/operator-mcp/fixture.mjs')).digest('hex'); f.mkdirSync('/profiles/shared');
-     f.writeFileSync('/profiles/shared/configuration.json', JSON.stringify({version:2,extensionCatalog:[{id:'fixture',sha256:extensionHash,tools:['fixture_probe']}],localMcpCatalog:[{id:'fixture',sha256:mcpHash,tools:['inspect','mutate'],args:['synthetic-installed'],resources:true},{id:'discovery',sha256:mcpHash,tools:['inspect','mutate'],args:['synthetic-installed'],resources:true,exposure:'deferred'},{id:'uncertain',sha256:mcpHash,tools:['inspect','mutate'],args:['reject-tool']}],resources:{instructions:['resources/common.md']},limits:{deadlineMs:60000,maxRequests:4,maxHistoryBytes:131072},models:['synthetic-model','glm-5.3-flash-cloud','alternate-model'].map(id=>({id,api:'openai-completions',contextWindow:65536,maxOutputTokens:0,reasoning:id!=='glm-5.3-flash-cloud'})),model:{provider:'cli-proxy',id:'synthetic-model',thinking:'low',overrides:['alternate-model'],fallbacks:['alternate-model']},tools:{whitelist:['*'],blacklist:[]}}));
+     f.writeFileSync('/profiles/shared/configuration.json', JSON.stringify({version:2,extensionCatalog:[{id:'fixture',sha256:extensionHash,tools:['fixture_probe']}],localMcpCatalog:[{id:'fixture',sha256:mcpHash,tools:['inspect','mutate'],args:['synthetic-installed'],resources:true},{id:'discovery',sha256:mcpHash,tools:['inspect','mutate'],args:['synthetic-installed'],resources:true,exposure:'deferred'},{id:'uncertain',sha256:mcpHash,tools:['inspect','mutate'],args:['reject-tool']}],remoteMcpCatalog:[{id:'remote-docs',url:"https://remote:7443/mcp",tools:['inspect','mutate'],resources:true,credential:{header:'X-Rex-Access',env:'REX_MCP_TEST_TOKEN'},privateNetwork:true}],resources:{instructions:['resources/common.md']},limits:{deadlineMs:60000,maxRequests:4,maxHistoryBytes:131072},models:['synthetic-model','glm-5.3-flash-cloud','alternate-model'].map(id=>({id,api:'openai-completions',contextWindow:65536,maxOutputTokens:0,reasoning:id!=='glm-5.3-flash-cloud'})),model:{provider:'cli-proxy',id:'synthetic-model',thinking:'low',overrides:['alternate-model'],fallbacks:['alternate-model']},tools:{whitelist:['*'],blacklist:[]}}));
      f.mkdirSync('/profiles/shared/resources'); f.writeFileSync('/profiles/shared/resources/common.md','Shared resource instruction.');
      f.writeFileSync('/profiles/shared/REX_SOUL.md','Common synthetic instructions.');
      f.mkdirSync('/profiles/extension-check'); f.writeFileSync('/profiles/extension-check/SOUL.md','Synthetic extension acceptance.'); f.writeFileSync('/profiles/extension-check/profile.json',JSON.stringify({version:2,id:'extension-check',resources:{extensions:['fixture']},tools:{whitelist:['read','ls','fixture_probe'],blacklist:['write','edit','bash','propose_profile']}}));
      f.mkdirSync('/profiles/mcp-check'); f.writeFileSync('/profiles/mcp-check/SOUL.md','Synthetic local MCP acceptance.'); f.writeFileSync('/profiles/mcp-check/profile.json',JSON.stringify({version:2,id:'mcp-check',resources:{codemode:true,mcp:['fixture'],extensions:['fixture']},tools:{whitelist:['codemode','fixture_probe','read','ls','mcp__fixture__inspect','list_mcp_resources','list_mcp_resource_templates','read_mcp_resource'],blacklist:['mcp__fixture__mutate','write','edit','bash','propose_profile']}}));
      f.mkdirSync('/profiles/discovery-check'); f.writeFileSync('/profiles/discovery-check/SOUL.md','Synthetic deferred discovery.'); f.writeFileSync('/profiles/discovery-check/profile.json',JSON.stringify({version:2,id:'discovery-check',resources:{codemode:true,mcp:['discovery']},tools:{whitelist:['codemode','tool_search','mcp__discovery__inspect','read_mcp_resource'],blacklist:['mcp__discovery__mutate']}}));
      f.mkdirSync('/profiles/uncertain-check'); f.writeFileSync('/profiles/uncertain-check/SOUL.md','Synthetic uncertain operation check.'); f.writeFileSync('/profiles/uncertain-check/profile.json',JSON.stringify({version:2,id:'uncertain-check',resources:{codemode:true,mcp:['uncertain']},tools:{whitelist:['codemode','write','mcp__uncertain__inspect'],blacklist:['mcp__uncertain__mutate']}}));
+     f.mkdirSync('/profiles/remote-check'); f.writeFileSync('/profiles/remote-check/SOUL.md','Synthetic remote connector acceptance.'); f.writeFileSync('/profiles/remote-check/profile.json',JSON.stringify({version:2,id:'remote-check',resources:{mcp:['remote-docs']},tools:{whitelist:['read','mcp__remote_docs__inspect','read_mcp_resource'],blacklist:['mcp__remote_docs__mutate','write','edit','bash','propose_profile']}}));
      f.mkdirSync('/profiles/limits-check'); f.writeFileSync('/profiles/limits-check/SOUL.md','Limited synthetic profile.'); f.writeFileSync('/profiles/limits-check/profile.json',JSON.stringify({version:2,id:'limits-check',limits:{maxRequests:1}}));
      f.mkdirSync('/profiles/soul-check'); f.writeFileSync('/profiles/soul-check/SOUL.md','Synthetic persona.'); f.mkdirSync('/profiles/soul-check/resources'); f.writeFileSync('/profiles/soul-check/resources/own.md','Own resource instruction.'); f.writeFileSync('/profiles/soul-check/resources/ignored.md','Ignored resource text.'); f.mkdirSync('/profiles/soul-check/resources/skills/review',{recursive:true}); f.writeFileSync('/profiles/soul-check/resources/skills/review/SKILL.md','---\\nname: review\\ndescription: Selected synthetic skill description.\\n---\\nSKILL_BODY_AFTER_LOADING'); f.writeFileSync('/profiles/soul-check/resources/skills/review/support.md','REFERENCE_BODY_AFTER_LOADING'); f.mkdirSync('/profiles/soul-check/resources/prompts'); f.writeFileSync('/profiles/soul-check/resources/prompts/review.md','synthetic-template $1'); f.writeFileSync('/profiles/soul-check/profile.json',JSON.stringify({version:2,id:'soul-check',resources:{workspaceInstructions:['AGENTS.md'],instructions:['resources/own.md'],skills:['resources/skills/review/SKILL.md'],prompts:['resources/prompts/review.md'],references:['resources/skills/review/support.md']}}));`,
   ]);
@@ -169,6 +182,191 @@ export function checkProfileAcceptance(project: string) {
       ],
     }),
   );
+  const remoteCertRoot = mkdtempSync(join(tmpdir(), "rex-remote-certs-"));
+  const remoteNetwork = `${project.slice(0, 45)}-rc-${createHash("sha256")
+    .update(`${project}:remote-check`)
+    .digest("hex")
+    .slice(0, 8)}`;
+  const remoteContainer = `${project}-fixture-remote`;
+  const remoteCertificates = `${project}_remote-certs`;
+  process.env.REX_MCP_TEST_TOKEN = "acceptance-connector-token";
+  try {
+    requireSuccess(docker(["network", "create", "--internal", remoteNetwork]));
+    execFileSync("openssl", [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:P-256",
+      "-nodes",
+      "-days",
+      "2",
+      "-subj",
+      "/CN=remote",
+      "-addext",
+      "subjectAltName=DNS:remote",
+      "-keyout",
+      join(remoteCertRoot, "key.pem"),
+      "-out",
+      join(remoteCertRoot, "cert.pem"),
+    ]);
+    const remoteRun = (task: string) =>
+      requireSuccess(
+        runProfileWorker({
+          // superseded loop below
+
+          project,
+          profile: "remote-check",
+          input: `profile: remote-check\n${task}`,
+          newSession: true,
+          connectors: {
+            endpoints: [
+              {
+                id: "remote-docs",
+                url: "https://remote:7443/mcp",
+                header: "X-Rex-Access",
+                env: "REX_MCP_TEST_TOKEN",
+                caEnv: "REX_MCP_TEST_CA",
+                privateNetwork: true,
+              },
+            ],
+            internal: true,
+          },
+        }),
+      );
+    requireSuccess(docker(["volume", "create", remoteCertificates]));
+    requireSuccess(
+      docker(
+        [
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--user",
+          "0:0",
+          "--read-only",
+          "--cap-drop",
+          "ALL",
+          "--security-opt",
+          "no-new-privileges:true",
+          "--log-driver",
+          "none",
+          "--interactive",
+          "-v",
+          `${remoteCertificates}:/certs`,
+          "--entrypoint",
+          "node",
+          IMAGE,
+          "-e",
+          'const f=require("node:fs");const d=JSON.parse(f.readFileSync(0));f.writeFileSync("/certs/key.pem",d.key);f.writeFileSync("/certs/cert.pem",d.cert);',
+        ],
+        JSON.stringify({
+          key: readFileSync(join(remoteCertRoot, "key.pem"), "utf8"),
+          cert: readFileSync(join(remoteCertRoot, "cert.pem"), "utf8"),
+        }),
+      ),
+    );
+    process.env.REX_MCP_TEST_CA = readFileSync(
+      join(remoteCertRoot, "cert.pem"),
+      "utf8",
+    );
+    const remoteStarted = docker([
+      "run",
+      "--detach",
+      "--init",
+      "--name",
+      remoteContainer,
+      "--network-alias",
+      "remote",
+      "--network",
+      remoteNetwork,
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges:true",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,nodev,size=16777216",
+      "-v",
+      `${remoteCertificates}:/certs:ro`,
+      "-v",
+      `${project}_rex-profile-remote-check-workspace:/workspace`,
+      "--env",
+      "REX_REMOTE_PORT=7443",
+      "--entrypoint",
+      "node",
+      IMAGE,
+      "/opt/rex/fixture-remote.mjs",
+    ]);
+    if (remoteStarted.status !== 0) {
+      console.error("REMOTE START FAILED", remoteStarted.stderr.slice(0, 400));
+      throw new Error("Remote fixture could not start.");
+    }
+    for (const task of [
+      "synthetic-remote-inspect",
+      "synthetic-remote-read",
+      "synthetic-remote-denied",
+    ]) {
+      const result = runProfileWorker({
+        project,
+        profile: "remote-check",
+        input: `profile: remote-check\n${task}`,
+        newSession: true,
+        connectors: {
+          endpoints: [
+            {
+              id: "remote-docs",
+              url: "https://remote:7443/mcp",
+              header: "X-Rex-Access",
+              env: "REX_MCP_TEST_TOKEN",
+              caEnv: "REX_MCP_TEST_CA",
+              privateNetwork: true,
+            },
+          ],
+          internal: true,
+        },
+      });
+      if (result.status !== 0) {
+        console.error("REMOTE_TASK_FAILED", task);
+        throw new Error(
+          "A remote connector acceptance task failed; no private diagnostics.",
+        );
+      }
+    }
+    requireSuccess(
+      runProfileWorker({
+        project,
+        profile: "remote-check",
+        command: [
+          "node",
+          "-e",
+          "const f=require('node:fs'),a=require('node:assert/strict');const dir='/state/profiles/remote-check/sessions';const text=f.readdirSync(dir).filter((n)=>n.endsWith('.jsonl')).map((n)=>f.readFileSync(dir+'/'+n,'utf8')).join('\\n');a.ok(text.includes('REMOTE_CONNECTOR_EVIDENCE'));a.ok(text.includes('REMOTE_RESOURCE_EVIDENCE'));a.ok(!text.includes('MCP_META_MUST_STAY_PRIVATE'));a.ok(!text.includes('acceptance-connector-token'));a.ok(!text.includes('MUTATION_MUST_NOT_DISPATCH'));a.ok(!JSON.stringify(f.readdirSync('/')).includes('connector'));a.ok(!f.existsSync('/run/connectors'));a.equal(f.readFileSync('/workspace/remote-calls.log','utf8'),'called');a.ok(f.readdirSync('/workspace').every((n)=>n.endsWith('.log')||n==='synthetic-own-workspace'));",
+        ],
+      }),
+    );
+  } finally {
+    const running = docker([
+      "container",
+      "inspect",
+      "--format",
+      "{{.State.Running}}",
+      remoteContainer,
+    ]);
+    if (running.status === 0)
+      requireSuccess(docker(["rm", "-f", remoteContainer]));
+    if (
+      docker(["network", "inspect", "--format", "{{.Name}}", remoteNetwork])
+        .status === 0
+    )
+      requireSuccess(docker(["network", "rm", remoteNetwork]));
+    if (
+      docker(["volume", "inspect", "--format", "{{.Name}}", remoteCertificates])
+        .status === 0
+    )
+      requireSuccess(docker(["volume", "rm", remoteCertificates]));
+    rmSync(remoteCertRoot, { recursive: true, force: true });
+  }
   probe("coding", "prepare");
   probe("research", "verify");
   assert.equal(
