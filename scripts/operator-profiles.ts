@@ -156,11 +156,11 @@ async function main() {
     // The shared configuration is part of the operator's export bundle.
     // The archive keeps the profiles root as a single entry so imports can
     // stage and validate before publishing anything.
-    const tar = spawnSync(
-      "tar",
-      ["-czf", "-", "-C", "/", "profiles"],
-      { encoding: "buffer", timeout: 30_000, maxBuffer: 128 * 1024 * 1024 },
-    );
+    const tar = spawnSync("tar", ["-czf", "-", "-C", "/", "profiles"], {
+      encoding: "buffer",
+      timeout: 30_000,
+      maxBuffer: 128 * 1024 * 1024,
+    });
     if (tar.error || tar.status !== 0) throw new Error("EXPORT_UNREADABLE");
     process.stdout.write(tar.stdout);
     return;
