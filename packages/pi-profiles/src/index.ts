@@ -42,7 +42,7 @@ export {
   sharedConfigurationDigest,
 } from "./proposals.ts";
 import { loadInstalledExtensions } from "./installed-extensions.ts";
-import { openLocalMcp } from "./local-mcp.ts";
+import { openMcpSession } from "./local-mcp.ts";
 export { TOOL_NAMES } from "./policy.ts";
 
 export class IncompleteProfileResponseError extends Error {
@@ -66,6 +66,7 @@ export interface ProfileRequestOptions {
   modelOverride?: string;
   installedExtensionsRoot?: string;
   installedMcpRoot?: string;
+  remoteMcpOrigin?: string;
   signal?: AbortSignal;
 }
 
@@ -86,6 +87,22 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
     origin.hash
   ) {
     throw new Error("Only the local inference relay is supported.");
+  }
+  let remoteOrigin: string | undefined;
+  if (options.remoteMcpOrigin !== undefined) {
+    const remote = new URL(options.remoteMcpOrigin);
+    if (
+      remote.protocol !== "http:" ||
+      remote.hostname !== "127.0.0.1" ||
+      remote.username ||
+      remote.password ||
+      remote.search ||
+      remote.hash ||
+      (remote.pathname !== "/" && remote.pathname !== "")
+    ) {
+      throw new Error("Only the local MCP connector router is supported.");
+    }
+    remoteOrigin = remote.origin;
   }
   const controller = new AbortController();
   const signal = options.signal
@@ -137,7 +154,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
         limits.deadlineMs,
       );
       deadline.unref();
-      let mcp: Awaited<ReturnType<typeof openLocalMcp>> | undefined;
+      let mcp: Awaited<ReturnType<typeof openMcpSession>> | undefined;
       try {
         const agentDir = join(state, "agent");
         const sessions = join(state, "sessions");
@@ -543,15 +560,13 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
             "Profile history limit reached; start a new session.",
           );
         }
-        mcp = await openLocalMcp(
-          (effective.mcpServers ?? []).filter(
-            (server): server is LocalMcpServer => !Object.hasOwn(server, "url"),
-          ),
-          options.installedMcpRoot,
-          options.cwd.trim(),
+        mcp = await openMcpSession(effective.mcpServers ?? [], {
+          installedRoot: options.installedMcpRoot,
+          remoteOrigin,
+          cwd: options.cwd.trim(),
           agentDir,
           signal,
-        );
+        });
         const { session } = await createAgentSession({
           cwd: options.cwd.trim(),
           agentDir,

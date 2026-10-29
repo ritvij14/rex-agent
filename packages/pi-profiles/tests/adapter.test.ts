@@ -1449,6 +1449,279 @@ test("fallback never replays lifecycle hooks from installed executable code", as
   assert.equal(await readFile(counter, "utf8"), "called");
 });
 
+test("a selected remote MCP server serves tools and resources through the connector router", async (t) => {
+  const f = await remoteMcpFixture(t);
+  f.replies.push(
+    { tool: "mcp__remote_docs__inspect", args: {} },
+    {
+      tool: "read_mcp_resource",
+      args: { server: "remote-docs", uri: "remote://evidence" },
+    },
+    { text: "finished" },
+  );
+  await runProfileRequest(f.options);
+  const history = JSON.stringify(f.received.at(-1)!.messages);
+  assert.ok(history.includes("REMOTE_MCP_EVIDENCE"));
+  assert.ok(history.includes("REMOTE_RESOURCE_EVIDENCE"));
+  assert.ok(!history.includes("MCP_META_MUST_STAY_PRIVATE"));
+  assert.ok(!history.includes("placeholder.invalid"));
+  assert.ok(
+    f.requests.some(
+      (r) =>
+        r.path === "/remote-docs/mcp" &&
+        r.headers["mcp-session-id"] === "fake-session-1",
+    ),
+  );
+  assert.equal(f.mutations(), 0);
+  assert.ok(f.sessionDeleted(), "closing the turn must DELETE the session");
+});
+
+test("remote MCP denials, failures and a missing router cannot dispatch a mutation", async (t) => {
+  const f = await remoteMcpFixture(t);
+  f.replies.push(
+    { tool: "mcp__remote_docs__mutate", args: {} },
+    { text: "denied" },
+  );
+  const denied = await runProfileRequest(f.options);
+  const records = (await readFile(denied.sessionFile!, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.ok(
+    records.some(
+      (entry) =>
+        entry.message?.toolName === "mcp__remote_docs__mutate" &&
+        entry.message.isError === true,
+    ),
+  );
+  assert.equal(f.mutations(), 0);
+  const failing = await remoteMcpFixture(t, true);
+  failing.replies.push({
+    tool: "mcp__remote_docs__inspect",
+    args: { fail: true },
+  });
+  await assert.rejects(runProfileRequest(failing.options));
+  assert.equal(failing.received.length, 1);
+  assert.equal(failing.mutations(), 0);
+  const routerless = await remoteMcpFixture(t);
+  delete (routerless.options as { remoteMcpOrigin?: string }).remoteMcpOrigin;
+  routerless.replies.push({ tool: "mcp__remote_docs__inspect", args: {} });
+  await assert.rejects(runProfileRequest(routerless.options), /Local MCP/);
+  assert.equal(routerless.received.length, 0);
+  assert.equal(routerless.requests.length, 0);
+});
+
+function remoteJson(id: unknown, result: unknown) {
+  return JSON.stringify({ jsonrpc: "2.0", id, result });
+}
+
+async function remoteMcpFixture(t: TestContext, failCalls = false) {
+  const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "shared"), { recursive: true });
+  const sharedPath = join(f.profilesRoot, "shared", "configuration.json");
+  const shared = {
+    version: 2,
+    remoteMcpCatalog: [
+      {
+        id: "remote-docs",
+        url: "https://placeholder.invalid:9/mcp",
+        tools: ["inspect", "mutate"],
+        resources: true,
+      },
+    ],
+  };
+  await writeFile(sharedPath, JSON.stringify(shared));
+  const manifest = join(f.profilesRoot, "research", "profile.json");
+  const definition = JSON.parse(await readFile(manifest, "utf8"));
+  definition.configuration.resources = { mcp: ["remote-docs"] };
+  definition.configuration.tools.whitelist.push(
+    "mcp__remote_docs__inspect",
+    "mcp__remote_docs__mutate",
+    "read_mcp_resource",
+  );
+  definition.configuration.tools.blacklist.push("mcp__remote_docs__mutate");
+  await writeFile(manifest, JSON.stringify(definition));
+  const requests: {
+    path: string;
+    method: string;
+    headers: Record<string, string>;
+    body: unknown;
+  }[] = [];
+  let mutations = 0;
+  let sessionDeleted = false;
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      const headers: Record<string, string> = {};
+      for (const [name, value] of Object.entries(req.headers)) {
+        if (
+          typeof value === "string" &&
+          !["authorization", "cookie", "set-cookie"].includes(name)
+        )
+          headers[name] = value;
+      }
+      const parsed = body
+        ? (JSON.parse(body) as {
+            id?: unknown;
+            method?: string;
+            params?:
+              | { name?: string; arguments?: { fail?: boolean } }
+              | { uri?: string };
+          })
+        : {};
+      requests.push({
+        path: req.url ?? "",
+        method: req.method ?? "",
+        headers,
+        body: parsed,
+      });
+      if (req.method === "DELETE") {
+        sessionDeleted = true;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({}));
+        return;
+      }
+      if (
+        parsed.method === undefined ||
+        String(parsed.method).startsWith("notifications/")
+      ) {
+        res.writeHead(202);
+        res.end();
+        return;
+      }
+      if (parsed.method === "initialize") {
+        res.writeHead(200, {
+          "content-type": "application/json",
+          "mcp-session-id": "fake-session-1",
+        });
+        res.end(
+          remoteJson(parsed.id, {
+            protocolVersion: "2025-06-18",
+            capabilities: { tools: {}, resources: {} },
+            serverInfo: { name: "remote-fixture", version: "0.0.0" },
+          }),
+        );
+        return;
+      }
+      if (req.method === "GET") {
+        res.writeHead(405);
+        res.end();
+        return;
+      }
+      if (parsed.method === "tools/list") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          remoteJson(parsed.id, {
+            tools: ["inspect", "mutate"].map((name) => ({
+              name,
+              description: `Synthetic remote ${name}`,
+              inputSchema: {
+                type: "object",
+                properties:
+                  name === "inspect" ? { fail: { type: "boolean" } } : {},
+                additionalProperties: false,
+              },
+            })),
+          }),
+        );
+        return;
+      }
+      if (parsed.method === "tools/call") {
+        const call = parsed.params as
+          { name?: string; arguments?: { fail?: boolean } } | undefined;
+        if (call?.name === "mutate") {
+          mutations++;
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            remoteJson(parsed.id, {
+              content: [{ type: "text", text: "MUTATION_MUST_NOT_DISPATCH" }],
+            }),
+          );
+          return;
+        }
+        if (failCalls && call?.arguments?.fail) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "synthetic remote failure" }));
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          remoteJson(parsed.id, {
+            content: [{ type: "text", text: "REMOTE_MCP_EVIDENCE" }],
+          }),
+        );
+        return;
+      }
+      if (parsed.method === "resources/list") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          remoteJson(parsed.id, {
+            resources: [
+              {
+                uri: "remote://evidence",
+                name: "evidence",
+                _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+              },
+            ],
+            _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+          }),
+        );
+        return;
+      }
+      if (parsed.method === "resources/read") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          remoteJson(parsed.id, {
+            contents: [
+              {
+                uri: (parsed.params as { uri?: string } | undefined)?.uri,
+                text: "REMOTE_RESOURCE_EVIDENCE",
+                mimeType: "text/plain",
+                _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+              },
+            ],
+            _meta: { private: "MCP_META_MUST_STAY_PRIVATE" },
+          }),
+        );
+        return;
+      }
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: parsed.id ?? null,
+          error: { code: -32601, message: "unsupported" },
+        }),
+      );
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  t.after(() => server.close());
+  const options = {
+    ...f,
+    remoteMcpOrigin: `http://127.0.0.1:${port}`,
+    input: "profile: research\nUse the selected remote MCP fixture",
+    newSession: true,
+    signal: AbortSignal.timeout(10000),
+  };
+  return {
+    ...f,
+    sharedPath,
+    shared,
+    definition,
+    manifest,
+    requests,
+    mutations: () => mutations,
+    sessionDeleted: () => sessionDeleted,
+    options,
+  };
+}
+
 async function mcpFixture(
   t: TestContext,
   mode = "literal ${HOME}; !not-a-command",

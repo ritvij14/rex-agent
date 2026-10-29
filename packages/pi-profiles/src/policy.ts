@@ -25,6 +25,7 @@ export function operatorToolNames(
       ...TOOL_NAMES,
       ...(shared?.extensionCatalog?.flatMap((entry) => [...entry.tools]) ?? []),
       ...localMcpToolNames(shared?.localMcpCatalog ?? []),
+      ...localMcpToolNames(shared?.remoteMcpCatalog ?? []),
     ]),
   ];
 }

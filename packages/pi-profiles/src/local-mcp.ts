@@ -6,26 +6,47 @@ import {
   McpError,
   JSON_RPC_ERROR_CODES,
   StdioTransport,
+  StreamableHttpTransport,
   toLlmContent,
   type CallToolResult,
+  type McpTransport,
 } from "@earendil-works/pi-mcp";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { localMcpToolNames, type LocalMcpServer } from "@rex/profiles";
+import {
+  localMcpToolNames,
+  type LocalMcpServer,
+  type RemoteMcpServer,
+} from "@rex/profiles";
 import { installedModulePaths } from "./installed-modules.ts";
 
-export async function openLocalMcp(
-  entries: readonly LocalMcpServer[],
-  installedRoot: string | undefined,
-  cwd: string,
-  agentDir: string,
-  signal: AbortSignal,
+interface ManagedEntry {
+  readonly id: string;
+  readonly tools: readonly string[];
+  readonly resources: boolean;
+  readonly exposure?: "direct" | "codemode" | "deferred";
+}
+
+const isRemote = (
+  entry: LocalMcpServer | RemoteMcpServer,
+): entry is RemoteMcpServer => Object.hasOwn(entry, "url");
+
+export async function openMcpSession(
+  entries: readonly (LocalMcpServer | RemoteMcpServer)[],
+  options: {
+    installedRoot: string | undefined;
+    remoteOrigin: string | undefined;
+    cwd: string;
+    agentDir: string;
+    signal: AbortSignal;
+  },
 ) {
+  const { installedRoot, remoteOrigin, cwd, agentDir, signal } = options;
   const tools: ToolDefinition[] = [];
   const connections: {
-    entry: LocalMcpServer;
+    entry: ManagedEntry;
     client: McpClient;
-    transport: StdioTransport;
+    transport: McpTransport;
   }[] = [];
   let temporary: string | undefined;
   let invalid = false;
@@ -81,37 +102,117 @@ export async function openLocalMcp(
       throw new Error(failure);
     }
   };
+  const registerEntryTools = async (entry: ManagedEntry, client: McpClient) => {
+    const resources = client.serverCapabilities?.resources;
+    if (
+      entry.resources &&
+      (!resources || typeof resources !== "object" || Array.isArray(resources))
+    )
+      throw new Error();
+    const offered = client.serverCapabilities?.tools
+      ? await client.listTools({ signal })
+      : [];
+    if (
+      offered.length !== entry.tools.length ||
+      new Set(offered.map((tool) => tool.name)).size !== offered.length ||
+      offered.some((tool) => !entry.tools.includes(tool.name))
+    )
+      throw new Error();
+    const names = localMcpToolNames([entry]);
+    for (const [toolIndex, rawName] of entry.tools.entries()) {
+      const tool = offered.find((tool) => tool.name === rawName)!;
+      if (!tool.inputSchema || tool.inputSchema.type !== "object")
+        throw new Error();
+      tools.push({
+        name: names[toolIndex]!,
+        label: `${entry.id}/${rawName}`,
+        exposure: entry.exposure ?? "direct",
+        namespace: { name: `mcp__${entry.id}`, aliases: [entry.id] },
+        description: tool.description ?? `Local MCP tool ${rawName}`,
+        parameters: Type.Unsafe({
+          ...tool.inputSchema,
+          properties: tool.inputSchema.properties ?? {},
+        }),
+        async execute(_id, params, callSignal) {
+          return perform(callSignal, (requestSignal) =>
+            client.callTool(rawName, params as Record<string, unknown>, {
+              signal: requestSignal,
+              timeoutMs: 5000,
+            }),
+          );
+        },
+      });
+    }
+  };
   if (!entries.length) return { tools, assertReady, close };
   try {
     signal.throwIfAborted();
-    const paths = await installedModulePaths(installedRoot, entries);
-    signal.throwIfAborted();
-    temporary = await mkdtemp(join(agentDir, "mcp-"));
-    signal.addEventListener("abort", abort, { once: true });
-    for (const [index, entry] of entries.entries()) {
+    const local = entries.filter(
+      (entry): entry is LocalMcpServer => !isRemote(entry),
+    );
+    const remote = entries.filter(isRemote);
+    if (remote.length && !remoteOrigin)
+      throw new Error("The remote MCP connector router is unavailable.");
+    if (local.length) {
+      const paths = await installedModulePaths(installedRoot, local);
+      signal.throwIfAborted();
+      temporary = await mkdtemp(join(agentDir, "mcp-"));
+      signal.addEventListener("abort", abort, { once: true });
+      for (const [index, entry] of local.entries()) {
+        signal.throwIfAborted();
+        if (invalid) throw new Error();
+        const transport = new StdioTransport({
+          command: process.execPath,
+          args: [paths[index]!, ...entry.args],
+          cwd,
+          inheritEnv: false,
+          env: {
+            HOME: temporary,
+            TMPDIR: temporary,
+            PATH: "/usr/local/bin:/usr/bin:/bin",
+            LANG: "C.UTF-8",
+          },
+          stderr: "pipe",
+          maxMessageBytes: 262144,
+          maxStderrBytes: 8192,
+          closeTimeoutMs: 250,
+        });
+        const client = new McpClient({
+          name: "rex",
+          version: "0.0.0",
+          requestTimeoutMs: 5000,
+          roots: [{ uri: pathToFileURL(cwd).href, name: "workspace" }],
+        });
+        connections.push({ entry, client, transport });
+        client.onNotification("notifications/tools/list_changed", () => {
+          invalid = true;
+        });
+        client.onError(() => {
+          invalid = true;
+          abort();
+        });
+        client.onClose(() => {
+          invalid = true;
+        });
+        await client.connect(transport);
+        signal.throwIfAborted();
+        await registerEntryTools(entry, client);
+      }
+    }
+    for (const entry of remote) {
       signal.throwIfAborted();
       if (invalid) throw new Error();
-      const transport = new StdioTransport({
-        command: process.execPath,
-        args: [paths[index]!, ...entry.args],
-        cwd,
-        inheritEnv: false,
-        env: {
-          HOME: temporary,
-          TMPDIR: temporary,
-          PATH: "/usr/local/bin:/usr/bin:/bin",
-          LANG: "C.UTF-8",
-        },
-        stderr: "pipe",
+      const transport = new StreamableHttpTransport({
+        url: new URL(`${remoteOrigin}/${entry.id}/mcp`),
+        openGetStream: false,
+        reconnect: { maxRetries: 0 },
         maxMessageBytes: 262144,
-        maxStderrBytes: 8192,
-        closeTimeoutMs: 250,
+        fetch: (input, init) => fetch(input, { ...init, redirect: "error" }),
       });
       const client = new McpClient({
         name: "rex",
         version: "0.0.0",
         requestTimeoutMs: 5000,
-        roots: [{ uri: pathToFileURL(cwd).href, name: "workspace" }],
       });
       connections.push({ entry, client, transport });
       client.onNotification("notifications/tools/list_changed", () => {
@@ -126,48 +227,7 @@ export async function openLocalMcp(
       });
       await client.connect(transport);
       signal.throwIfAborted();
-      const resources = client.serverCapabilities?.resources;
-      if (
-        entry.resources &&
-        (!resources ||
-          typeof resources !== "object" ||
-          Array.isArray(resources))
-      )
-        throw new Error();
-      const offered = client.serverCapabilities?.tools
-        ? await client.listTools({ signal })
-        : [];
-      if (
-        offered.length !== entry.tools.length ||
-        new Set(offered.map((tool) => tool.name)).size !== offered.length ||
-        offered.some((tool) => !entry.tools.includes(tool.name))
-      )
-        throw new Error();
-      const names = localMcpToolNames([entry]);
-      for (const [toolIndex, rawName] of entry.tools.entries()) {
-        const tool = offered.find((tool) => tool.name === rawName)!;
-        if (!tool.inputSchema || tool.inputSchema.type !== "object")
-          throw new Error();
-        tools.push({
-          name: names[toolIndex]!,
-          label: `${entry.id}/${rawName}`,
-          exposure: entry.exposure ?? "direct",
-          namespace: { name: `mcp__${entry.id}`, aliases: [entry.id] },
-          description: tool.description ?? `Local MCP tool ${rawName}`,
-          parameters: Type.Unsafe({
-            ...tool.inputSchema,
-            properties: tool.inputSchema.properties ?? {},
-          }),
-          async execute(_id, params, callSignal) {
-            return perform(callSignal, (requestSignal) =>
-              client.callTool(rawName, params as Record<string, unknown>, {
-                signal: requestSignal,
-                timeoutMs: 5000,
-              }),
-            );
-          },
-        });
-      }
+      await registerEntryTools(entry, client);
     }
     const resourceServers = connections.filter(({ entry }) => entry.resources);
     if (resourceServers.length) {
@@ -286,11 +346,12 @@ export async function openLocalMcp(
     }
     assertReady();
     return { tools, assertReady, close };
-  } catch {
+  } catch (error) {
     await close();
     signal.throwIfAborted();
     throw new Error(
       "Local MCP connection failed or its installed definition is invalid.",
+      { cause: error instanceof Error ? error.message : String(error) },
     );
   }
 }
