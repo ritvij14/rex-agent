@@ -68,6 +68,12 @@ A catalog entry may set `exposure` to `direct` (the default when omitted), `code
 
 Once any MCP connection becomes unusable, every later tool call in that turn is refused before it runs, including calls from a Codemode script that caught the MCP error. Effects that completed before the failure are not rolled back.
 
+## Operator commands and migration
+
+The operator launcher exposes the only profile-root surface: list (IDs only), show, validate and effective-config (the operator's own definitions read back through a networkless root helper), plus export and import of the definitions root as a single profiles-prefixed tar.gz. Export/import refuse to run while a profile worker of that project exists. Import stages the archive, validates the shared configuration and every profile (effective resolution for SOUL profiles), refuses collisions with existing destinations — including the public image templates a fresh Docker volume seeds — and only then publishes; it never replaces or removes an existing profile.
+
+Migration is deliberately separate and non-destructive: `scripts/migration-dry-run.ts <root>` reads only file counts and approximate bytes of an operator-supplied private root and prints counts (no names, no contents). Old workspace data does not auto-assign to profiles; mapping or copying specific old material needs its own approval, the old aggregate volumes remain untouched and remain unreadable to new workers either way. Normal installation refresh and activation stay separate approved operations.
+
 ## Approved remote MCP destinations
 
 A shared `remoteMcpCatalog` entry pins `id`, an `https` URL (fixed hostname, explicit path, no userinfo/query/fragment), declared tools, and optional `resources`/`exposure` sharing the same semantics as local servers. It may declare `credential: { header, env }` (an operator environment variable NAME only), a public `caCertificate` for a self-hosted destination, and `privateNetwork: true` when the destination lives on a private range. Profiles select IDs through `resources.mcp`; IDs are unique across local and remote catalogs, and tool names collide neither with extensions nor each other. Catalog entries never carry values, downloads or endpoint alternatives.
