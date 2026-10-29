@@ -1476,6 +1476,29 @@ test("a selected remote MCP server serves tools and resources through the connec
   assert.ok(f.sessionDeleted(), "closing the turn must DELETE the session");
 });
 
+test("a cancelled remote MCP turn still closes its session", async (t) => {
+  const f = await remoteMcpFixture(t, true);
+  const controller = new AbortController();
+  await writeFile(join(f.cwd, "remote-evidence.md"), "cancelled evidence");
+  f.replies.push({ tool: "mcp__remote_docs__inspect", args: { fail: true } });
+  const run = runProfileRequest({
+    ...f.options,
+    signal: controller.signal,
+  }).finally(() => controller.abort());
+  while (
+    !f.requests.some(
+      (request) =>
+        request.path === "/remote-docs/mcp" &&
+        (request.body as { method?: string }).method === "tools/call",
+    )
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  controller.abort();
+  await assert.rejects(run);
+  assert.ok(f.sessionDeleted(), "cancellation must DELETE the remote session");
+});
+
 test("remote MCP denials, failures and a missing router cannot dispatch a mutation", async (t) => {
   const f = await remoteMcpFixture(t);
   f.replies.push(
@@ -1643,8 +1666,10 @@ async function remoteMcpFixture(t: TestContext, failCalls = false) {
           return;
         }
         if (failCalls && call?.arguments?.fail) {
-          res.writeHead(500, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "synthetic remote failure" }));
+          setTimeout(() => {
+            res.writeHead(500, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: "synthetic remote failure" }));
+          }, 400);
           return;
         }
         res.writeHead(200, { "content-type": "application/json" });

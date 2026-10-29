@@ -153,51 +153,52 @@ export async function openMcpSession(
     const remote = entries.filter(isRemote);
     if (remote.length && !remoteOrigin)
       throw new Error("The remote MCP connector router is unavailable.");
+    let paths: Awaited<ReturnType<typeof installedModulePaths>> | undefined;
     if (local.length) {
-      const paths = await installedModulePaths(installedRoot, local);
+      paths = await installedModulePaths(installedRoot, local);
       signal.throwIfAborted();
       temporary = await mkdtemp(join(agentDir, "mcp-"));
-      signal.addEventListener("abort", abort, { once: true });
-      for (const [index, entry] of local.entries()) {
-        signal.throwIfAborted();
-        if (invalid) throw new Error();
-        const transport = new StdioTransport({
-          command: process.execPath,
-          args: [paths[index]!, ...entry.args],
-          cwd,
-          inheritEnv: false,
-          env: {
-            HOME: temporary,
-            TMPDIR: temporary,
-            PATH: "/usr/local/bin:/usr/bin:/bin",
-            LANG: "C.UTF-8",
-          },
-          stderr: "pipe",
-          maxMessageBytes: 262144,
-          maxStderrBytes: 8192,
-          closeTimeoutMs: 250,
-        });
-        const client = new McpClient({
-          name: "rex",
-          version: "0.0.0",
-          requestTimeoutMs: 5000,
-          roots: [{ uri: pathToFileURL(cwd).href, name: "workspace" }],
-        });
-        connections.push({ entry, client, transport });
-        client.onNotification("notifications/tools/list_changed", () => {
-          invalid = true;
-        });
-        client.onError(() => {
-          invalid = true;
-          abort();
-        });
-        client.onClose(() => {
-          invalid = true;
-        });
-        await client.connect(transport);
-        signal.throwIfAborted();
-        await registerEntryTools(entry, client);
-      }
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    for (const [index, entry] of local.entries()) {
+      signal.throwIfAborted();
+      if (invalid || !paths || !temporary) throw new Error();
+      const transport = new StdioTransport({
+        command: process.execPath,
+        args: [paths[index]!, ...entry.args],
+        cwd,
+        inheritEnv: false,
+        env: {
+          HOME: temporary,
+          TMPDIR: temporary,
+          PATH: "/usr/local/bin:/usr/bin:/bin",
+          LANG: "C.UTF-8",
+        },
+        stderr: "pipe",
+        maxMessageBytes: 262144,
+        maxStderrBytes: 8192,
+        closeTimeoutMs: 250,
+      });
+      const client = new McpClient({
+        name: "rex",
+        version: "0.0.0",
+        requestTimeoutMs: 5000,
+        roots: [{ uri: pathToFileURL(cwd).href, name: "workspace" }],
+      });
+      connections.push({ entry, client, transport });
+      client.onNotification("notifications/tools/list_changed", () => {
+        invalid = true;
+      });
+      client.onError(() => {
+        invalid = true;
+        abort();
+      });
+      client.onClose(() => {
+        invalid = true;
+      });
+      await client.connect(transport);
+      signal.throwIfAborted();
+      await registerEntryTools(entry, client);
     }
     for (const entry of remote) {
       signal.throwIfAborted();
