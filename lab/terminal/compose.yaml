@@ -42,6 +42,7 @@ services:
       additional_contexts:
         profile-core: ../../packages/profiles
         pi-profiles: ../../packages/pi-profiles
+        operator-scripts: ../../scripts
     command: [sandbox]
     network_mode: none
     cpus: 2

@@ -89,6 +89,7 @@ export async function listProfiles(profilesRoot: string): Promise<string[]> {
     for (const entry of entries) {
       if (!entry.isDirectory())
         throw new ProfileError("INVALID_PROFILE_DEFINITION");
+      if (entry.name === "shared") continue;
       validateProfileId(entry.name);
       const files = await readdir(join(home, entry.name));
       if (!files.includes("profile.json") && !files.includes("SOUL.md")) {

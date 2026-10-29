@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +15,9 @@ import {
   docker,
   IMAGE,
   NODE,
+  operatorExport,
+  operatorImport,
+  operatorInspect,
   operatorProfileCommand,
   requireSuccess,
   runProfileWorker,
@@ -706,7 +710,110 @@ export function checkProfileAcceptance(project: string) {
     ),
   );
   requireSuccess(run("soul-check", "synthetic-revised-instruction", true));
+  // Operator inspection and safe import/export journeys.
+  const listed = JSON.parse(operatorInspect(project, "list") || "[]");
+  for (const expected of [
+    "coding",
+    "research",
+    "qa",
+    "soul-check",
+    "synthetic-helper",
+  ])
+    assert.ok(listed.includes(expected), `profile ${expected} must be listed`);
+  assert.equal(
+    JSON.parse(operatorInspect(project, "show", "soul-check")).soul,
+    "Synthetic revised instruction.",
+  );
+  assert.match(
+    operatorInspect(project, "validate", "soul-check"),
+    /Valid profile/,
+  );
+  assert.throws(() => operatorInspect(project, "show", "nonexistent"));
+  assert.throws(() => operatorInspect(project, "validate", "nope"));
+  assert.equal(
+    JSON.parse(operatorInspect(project, "effective", "soul-check"))
+      .configuration.model.id,
+    "synthetic-model",
+  );
+  const archive = join(
+    tmpdir(),
+    `rex-operator-export-${randomUUID().slice(0, 8)}.tar.gz`,
+  );
+  operatorExport(project, archive);
+  assert.throws(() => operatorImport(project, archive), /rejected/);
+  const busyName = `${project}-rex-coding`;
+  requireSuccess(
+    docker(
+      workerDockerArgs({
+        project,
+        image: IMAGE,
+        profile: "coding",
+        volumes: workerVolumes(project, "coding"),
+        name: busyName,
+        detached: true,
+        command: ["sleep", "60"],
+      }),
+    ),
+  );
+  assert.throws(() => operatorExport(project, archive), /idle workers/);
+  assert.throws(() => operatorImport(project, archive), /idle workers/);
+  requireSuccess(docker(["rm", "-f", busyName]));
+  const mirror = `${project.slice(0, 36)}-mirror-${randomUUID().slice(0, 8)}`;
+  try {
+    const imported = JSON.parse(operatorImport(mirror, archive));
+    assert.equal(imported.imported, listed.length);
+    assert.deepEqual(JSON.parse(operatorInspect(mirror, "list")), listed);
+    assert.match(
+      JSON.parse(operatorInspect(mirror, "effective", "soul-check"))
+        .configuration.instructions,
+      /Common synthetic instructions./,
+    );
+    requireSuccess(
+      runProfileWorker({
+        project: mirror,
+        profile: "soul-check",
+        command: [
+          "node",
+          "-e",
+          "require('node:fs').writeFileSync('/workspace/AGENTS.md','Explicit selected workspace instruction.');",
+        ],
+      }),
+    );
+    const mirrorRun = runProfileWorker({
+      project: mirror,
+      profile: "soul-check",
+      input: "profile: soul-check\nsynthetic-cap-free-response",
+      newSession: true,
+      socketVolume: `${project}_inference-socket`,
+    });
+    if (mirrorRun.status !== 0) {
+      const diag = runProfileWorker({
+        project: mirror,
+        profile: "soul-check",
+        command: [
+          "node",
+          "-e",
+          'const f=require("node:fs");const d="/state/profiles/soul-check/sessions";console.log("SESS:",f.existsSync(d)?f.readdirSync(d).filter(n=>n.endsWith(".jsonl")).map(n=>f.readFileSync(d+"/"+n,"utf8").slice(-1500)).join("|"):"none");console.log("WS:",f.readdirSync("/workspace"))',
+        ],
+      });
+      console.error(diag.stdout.slice(0, 900), diag.stderr.slice(0, 200));
+      requireSuccess(mirrorRun);
+    }
+  } finally {
+    const mirrorVolumes = [
+      `${mirror}_profile-definitions`,
+      ...Object.values(workerVolumes(mirror, "soul-check")),
+    ];
+    for (const volume of new Set(mirrorVolumes)) {
+      if (
+        docker(["volume", "inspect", "--format", "{{.Name}}", volume])
+          .status === 0
+      )
+        requireSuccess(docker(["volume", "rm", volume]));
+    }
+    unlinkSync(archive);
+  }
   console.log(
-    "PASS: installed profile workers, private volumes/configuration, real shell/tool denials, concurrency, truncation recovery, builder/operator admission and persistence.",
+    "PASS: installed profile workers, private volumes/configuration, real shell/tool denials, concurrency, truncation recovery, builder/operator admission, persistence, operator inspection and import/export journeys.",
   );
 }

@@ -1,6 +1,13 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readSync, unlinkSync } from "node:fs";
+import {
+  closeSync,
+  openSync,
+  readFileSync,
+  readSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -133,7 +140,9 @@ export function docker(
 
 export function requireSuccess(result: SpawnSyncReturns<string>) {
   if (result.error || result.status !== 0)
-    throw new Error("Profile container operation failed.");
+    throw new Error(
+      `Profile container operation failed: ${result.stderr?.slice(0, 200) || result.error || "no output"}`,
+    );
   return result.stdout.trim();
 }
 
@@ -565,4 +574,139 @@ export function operatorProfileCommand(
       ...(digest ? [digest] : []),
     ]),
   );
+}
+
+// Operator profile-root inspection and import/export. Inspection is read-only;
+// import and export refuse to run while any profile worker of this project is
+// starting or running, because imports briefly publish new definition files.
+function dockerBytes(args: string[], input?: Buffer): SpawnSyncReturns<Buffer> {
+  return spawnSync("docker", args, {
+    encoding: "buffer",
+    input,
+    timeout: 240000,
+    maxBuffer: 128 * 1024 * 1024,
+  });
+}
+
+function assertIdle(project: string) {
+  const running = spawnSync(
+    "docker",
+    ["ps", "--filter", `name=${project}-rex-`, "--format", "{{.Names}}"],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  if (running.status !== 0)
+    throw new Error("Profile container operation failed.");
+  if (running.stdout.trim())
+    throw new Error(
+      `Definition import/export requires idle workers: ${running.stdout.trim()}`,
+    );
+}
+
+export function operatorInspect(
+  project: string,
+  action: "list" | "show" | "validate" | "effective",
+  id?: string,
+): string {
+  return requireSuccess(
+    docker([
+      "run",
+      "--rm",
+      ...HELPER_LIMITS,
+      "--network",
+      "none",
+      "--user",
+      "0:0",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges:true",
+      "--log-driver",
+      "none",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,nodev,size=67108864",
+      "--entrypoint",
+      "/usr/bin/env",
+      "-v",
+      `${project}_profile-definitions:/profiles:ro`,
+      IMAGE,
+      ...NODE,
+      "/opt/rex/scripts/operator-profiles.ts",
+      action,
+      ...(id ? [id] : []),
+    ]),
+  );
+}
+
+export function operatorExport(project: string, archive: string): void {
+  assertIdle(project);
+  const result = dockerBytes([
+    "run",
+    "--rm",
+    ...HELPER_LIMITS,
+    "--network",
+    "none",
+    "--user",
+    "0:0",
+    "--read-only",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--log-driver",
+    "none",
+    "--tmpfs",
+    "/tmp:rw,noexec,nosuid,nodev,size=134217728",
+    "--entrypoint",
+    "/usr/bin/env",
+    "-v",
+    `${project}_profile-definitions:/profiles:ro`,
+    IMAGE,
+    ...NODE,
+    "/opt/rex/scripts/operator-profiles.ts",
+    "export",
+  ]);
+  if (result.error || result.status !== 0 || !result.stdout.length)
+    throw new Error("Profile container operation failed.");
+  writeFileSync(archive, result.stdout, { mode: 0o600 });
+}
+
+export function operatorImport(project: string, archive: string): string {
+  assertIdle(project);
+  const input = readFileSync(archive);
+  const result = dockerBytes(
+    [
+      "run",
+      "--rm",
+      "-i",
+      ...HELPER_LIMITS,
+      "--network",
+      "none",
+      "--user",
+      "0:0",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges:true",
+      "--log-driver",
+      "none",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,size=134217728",
+      "--entrypoint",
+      "/usr/bin/env",
+      "-v",
+      `${project}_profile-definitions:/profiles:nocopy`,
+      IMAGE,
+      ...NODE,
+      "/opt/rex/scripts/operator-profiles.ts",
+      "import",
+    ],
+    input,
+  );
+  if (result.error || result.status !== 0)
+    throw new Error(
+      `Profile import rejected: ${(result.stderr || Buffer.alloc(0)).toString("utf8").trim().slice(0, 200) || "private reasons"}`,
+    );
+  return result.stdout.toString("utf8").trim();
 }

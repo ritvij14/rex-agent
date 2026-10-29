@@ -18,6 +18,7 @@ RUN npm ci --ignore-scripts --omit=dev --no-audit --no-fund --cache /tmp/rex-npm
     && mkdir -p /workspace /state /run/rex /profiles /proposals \
     && chown node:node /workspace /state /run/rex /proposals
 COPY transport.ts configure.ts runtime.ts verify.ts provision.ts connector.ts /opt/rex/
+COPY --from=operator-scripts operator-profiles.ts /opt/rex/scripts/operator-profiles.ts
 COPY fixture-extension.mjs /opt/rex/operator-extensions/fixture.mjs
 COPY fixture-mcp.mjs /opt/rex/operator-mcp/fixture.mjs
 COPY fixture-mcp.mjs /opt/rex/operator-mcp/discovery.mjs
