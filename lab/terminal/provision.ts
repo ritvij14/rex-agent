@@ -3,6 +3,7 @@ import {
   loadSharedConfiguration,
   lookupProfile,
   ProfileError,
+  soulWarnings,
   validateProfileId,
 } from "@rex/profiles";
 import { writeResourceFiles } from "@rex/pi-profiles/proposals";
@@ -60,7 +61,12 @@ export async function provisionProfile(
   if (shared) {
     const sharedHome = join(target, "shared");
     await mkdir(sharedHome);
-    const { soul, resourceFiles, ...configuration } = shared;
+    const {
+      soul,
+      soulTruncated: _cut,
+      resourceFiles,
+      ...configuration
+    } = shared;
     await writeResourceFiles(sharedHome, resourceFiles ?? []);
     await writeFile(
       join(sharedHome, "configuration.json"),
@@ -68,15 +74,23 @@ export async function provisionProfile(
     );
     if (soul) await writeFile(join(sharedHome, "REX_SOUL.md"), soul);
   }
+  // The snapshot keeps only the cut text, so the worker cannot detect the cut;
+  // the operator launcher reports these fixed lines instead.
+  return soulWarnings(profile, shared);
 }
 
 if (process.argv[1]?.endsWith("/provision.ts")) {
   (async () => {
     if (process.getuid?.() !== 0) throw new Error();
-    await provisionProfile("/master", "/snapshot", process.argv[2] ?? "");
+    const warnings = await provisionProfile(
+      "/master",
+      "/snapshot",
+      process.argv[2] ?? "",
+    );
     for (const path of ["/workspace", "/state", "/proposals"]) {
       await chown(path, 1000, 1000);
     }
+    for (const warning of warnings) console.log(warning);
   })().catch(() => {
     console.error(
       "Profile provisioning rejected; private diagnostics omitted.",

@@ -10,6 +10,7 @@ import {
   resourcePaths,
   validateResourceFiles,
   parseSharedConfiguration,
+  SOUL_LIMIT,
   validateProfileId,
   type ExtensionCatalogEntry,
   type CatalogModel,
@@ -43,6 +44,9 @@ export {
   parseProfileRequest,
   parseSharedConfiguration,
   resolveEffectiveProfile,
+  SOUL_CUT_WARNINGS,
+  SOUL_LIMIT,
+  soulWarnings,
   validateProfileId,
   type ExtensionCatalogEntry,
   type CatalogModel,
@@ -58,12 +62,13 @@ export {
 } from "./configuration.ts";
 
 const DEFINITION_LIMIT = 4096;
-const SOUL_LIMIT = 16384;
+const RESOURCE_FILE_LIMIT = 16384;
 
 export interface Profile {
   readonly id: string;
   readonly home: string;
   readonly soul?: string;
+  readonly soulTruncated?: true;
   readonly configuration?: ProfileConfiguration;
   readonly model?: ModelReference;
   readonly tools?: ToolPolicy;
@@ -107,10 +112,10 @@ export async function listProfiles(profilesRoot: string): Promise<string[]> {
   }
 }
 
-async function readBounded(
+async function readPrefix(
   path: string,
   limit: number,
-): Promise<string | undefined> {
+): Promise<{ bytes: Buffer; oversized: boolean } | undefined> {
   let handle: FileHandle;
   try {
     handle = await open(
@@ -122,8 +127,7 @@ async function readBounded(
     throw error;
   }
   try {
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > limit) {
+    if (!(await handle.stat()).isFile()) {
       throw new ProfileError("INVALID_PROFILE_DEFINITION");
     }
     const buffer = Buffer.alloc(limit + 1);
@@ -138,13 +142,42 @@ async function readBounded(
       if (bytesRead === 0) break;
       length += bytesRead;
     }
-    if (length > limit) {
-      throw new ProfileError("INVALID_PROFILE_DEFINITION");
-    }
-    return buffer.subarray(0, length).toString("utf8");
+    return {
+      bytes: buffer.subarray(0, Math.min(length, limit)),
+      oversized: length > limit,
+    };
   } finally {
     await handle.close();
   }
+}
+
+async function readBounded(
+  path: string,
+  limit: number,
+): Promise<string | undefined> {
+  const file = await readPrefix(path, limit);
+  if (file?.oversized) throw new ProfileError("INVALID_PROFILE_DEFINITION");
+  return file?.bytes.toString("utf8");
+}
+
+// Persona files over the limit are cut rather than rejected; reads stay bounded.
+async function readPersona(
+  path: string,
+): Promise<{ text: string; truncated: boolean } | undefined> {
+  const file = await readPrefix(path, SOUL_LIMIT);
+  if (!file) return undefined;
+  const bytes = file.oversized ? withoutSplitCharacter(file.bytes) : file.bytes;
+  return { text: bytes.toString("utf8"), truncated: file.oversized };
+}
+
+// The byte limit can split a multi-byte UTF-8 character; drop that partial
+// character instead of decoding it as U+FFFD.
+function withoutSplitCharacter(bytes: Buffer): Buffer {
+  let start = bytes.length - 1;
+  while (start > bytes.length - 4 && (bytes[start]! & 0xc0) === 0x80) start--;
+  const lead = bytes[start]!;
+  const size = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+  return start + size > bytes.length ? bytes.subarray(0, start) : bytes;
 }
 
 export async function lookupProfile(
@@ -174,7 +207,8 @@ export async function lookupProfile(
     if (parsed && parsed.id !== id) {
       throw new ProfileError("INVALID_PROFILE_DEFINITION");
     }
-    const soulText = await readBounded(join(home, "SOUL.md"), SOUL_LIMIT);
+    const persona = await readPersona(join(home, "SOUL.md"));
+    const soulText = persona?.text;
     if (soulText !== undefined && !soulText.trim()) {
       throw new ProfileError("INVALID_PROFILE_DEFINITION");
     }
@@ -202,6 +236,7 @@ export async function lookupProfile(
       ...(parsed?.resources ? { resources: parsed.resources } : {}),
       ...(resourceFiles ? { resourceFiles } : {}),
       ...(soul ? { soul } : {}),
+      ...(persona?.truncated ? { soulTruncated: true as const } : {}),
     });
   } catch (error) {
     if (error instanceof ProfileError) throw error;
@@ -239,15 +274,16 @@ export async function loadSharedConfiguration(
     } catch {
       throw new ProfileError("INVALID_SHARED_CONFIGURATION");
     }
-    let soul: string | undefined;
+    let persona: Awaited<ReturnType<typeof readPersona>>;
     try {
-      soul = await readBounded(join(home, "REX_SOUL.md"), SOUL_LIMIT);
+      persona = await readPersona(join(home, "REX_SOUL.md"));
     } catch (error) {
       if (error instanceof ProfileError) {
         throw new ProfileError("INVALID_SHARED_CONFIGURATION");
       }
       throw error;
     }
+    const soul = persona?.text;
     if (soul !== undefined && !soul.trim()) {
       throw new ProfileError("INVALID_SHARED_CONFIGURATION");
     }
@@ -257,6 +293,7 @@ export async function loadSharedConfiguration(
     return Object.freeze({
       ...parsed,
       ...(soul ? { soul } : {}),
+      ...(persona?.truncated ? { soulTruncated: true as const } : {}),
       ...(resourceFiles ? { resourceFiles } : {}),
     });
   } catch (error) {
@@ -347,7 +384,7 @@ async function readInstructionResources(
         directory = join(directory, part);
         if (!(await lstat(directory)).isDirectory()) throw new Error();
       }
-      const text = await readBounded(join(home, path), SOUL_LIMIT);
+      const text = await readBounded(join(home, path), RESOURCE_FILE_LIMIT);
       if (text === undefined) throw new Error();
       result.push({ path, text });
     }

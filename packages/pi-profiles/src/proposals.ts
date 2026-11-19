@@ -11,6 +11,7 @@ import {
 import { dirname, isAbsolute, join } from "node:path";
 import {
   loadSharedConfiguration,
+  SOUL_LIMIT,
   validateResourceFiles,
   resourcePaths,
   type ResourceFile,
@@ -106,7 +107,11 @@ export async function sharedConfigurationDigest(
   profilesRoot: string,
 ): Promise<string | null> {
   const shared = await readShared(profilesRoot);
-  return shared ? digestOf(JSON.stringify(shared)) : null;
+  if (!shared) return null;
+  // Worker snapshots hold the already-cut persona, so the cut flag would make
+  // a worker draft's digest differ from the operator's master digest.
+  const { soulTruncated: _cut, ...configuration } = shared;
+  return digestOf(JSON.stringify(configuration));
 }
 
 async function root(path: string) {
@@ -195,7 +200,7 @@ export async function createProposal(
     if (
       typeof soul !== "string" ||
       !soul.trim() ||
-      Buffer.byteLength(soul) > 16384
+      Buffer.byteLength(soul) > SOUL_LIMIT
     )
       throw new Error("A bounded nonempty SOUL is required.");
   } else {

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   parseProfileArguments,
   parseProfileRequest,
+  SOUL_CUT_WARNINGS,
   validateProfileId,
 } from "@rex/profiles";
 
@@ -281,6 +282,11 @@ export function runProfileWorker(options: {
       throw new Error("Profile provisioning failed.", {
         cause: provisioned.stderr,
       });
+    // Forward only the fixed warning texts, never other helper output.
+    const knownWarnings: string[] = Object.values(SOUL_CUT_WARNINGS);
+    const warnings = provisioned.stdout
+      .split("\n")
+      .filter((line) => knownWarnings.includes(line));
     const name = `${options.project}-rex-${options.profile}`;
     const connectorName = `${options.project}-rex-connector-${options.profile}`;
     const connectorNetwork = `${projectNetwork(options.project, options.profile)}`;
@@ -466,7 +472,7 @@ export function runProfileWorker(options: {
       if (options.maintain && !options.command) args.push("--maintain");
       if (options.modelOverride !== undefined && !options.command)
         args.push("--model", options.modelOverride);
-      return docker(args, options.input);
+      return { ...docker(args, options.input), warnings };
     } finally {
       // A killed Docker client is not proof that its worker stopped.
       const remains = docker([

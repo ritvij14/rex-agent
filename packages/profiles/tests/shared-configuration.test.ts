@@ -12,6 +12,8 @@ import {
   ProfileError,
   ProfileRuntime,
   resolveEffectiveProfile,
+  SOUL_CUT_WARNINGS,
+  soulWarnings,
   validateProfileId,
   type SharedConfiguration,
 } from "@rex/profiles";
@@ -206,6 +208,47 @@ test("resolve rejects incomplete profiles instead of guessing", async (t) => {
   );
 });
 
+test("SOUL files longer than 50 KiB are cut at a whole character and reported", async (t) => {
+  const f = await fixture(t);
+  const ownPath = join(f.root, "minimal", "SOUL.md");
+  const sharedPath = join(f.root, "shared", "REX_SOUL.md");
+  const loadShared = () => loadSharedConfiguration(join(f.root, "shared"));
+  const exact = "é".repeat(25600);
+  assert.equal(Buffer.byteLength(exact), 51200);
+  await writeFile(ownPath, exact);
+  await writeFile(sharedPath, exact);
+  const own = await lookupProfile(f.root, "minimal");
+  const shared = await loadShared();
+  assert.equal(own.soul, exact);
+  assert.equal(shared.soul, exact);
+  assert.deepEqual(soulWarnings(own, shared), []);
+
+  // Byte 51200 is the first half of a two-byte character.
+  const straddling = "a" + exact;
+  await writeFile(ownPath, straddling);
+  await writeFile(sharedPath, straddling + "x".repeat(1024 * 1024));
+  const cutOwn = await lookupProfile(f.root, "minimal");
+  const cutShared = await loadShared();
+  const expected = "a" + "é".repeat(25599);
+  assert.equal(cutOwn.soul, expected);
+  assert.equal(cutShared.soul, expected);
+  assert.deepEqual(soulWarnings(cutOwn, cutShared), [
+    SOUL_CUT_WARNINGS.shared,
+    SOUL_CUT_WARNINGS.own,
+  ]);
+  assert.deepEqual(soulWarnings(cutOwn), [SOUL_CUT_WARNINGS.own]);
+  assert.equal(
+    resolveEffectiveProfile(cutOwn, cutShared).configuration.instructions,
+    `${expected}\n\n${expected}`,
+  );
+
+  await writeFile(ownPath, " ".repeat(51200) + "persona after the cut");
+  await assert.rejects(
+    lookupProfile(f.root, "minimal"),
+    errorCode("INVALID_PROFILE_DEFINITION"),
+  );
+});
+
 test("lookup rejects unusable SOUL bundles", async (t) => {
   const f = await fixture(t, async (root) => {
     const outside = join(root, "elsewhere.md");
@@ -218,7 +261,6 @@ test("lookup rejects unusable SOUL bundles", async (t) => {
     await writeFile(join(f.root, id, "SOUL.md"), text);
   };
   await writeSoul("blank", "  \n\t ");
-  await writeSoul("large", "x".repeat(16385));
   await mkdir(join(f.root, "no-soul"));
   await writeFile(
     join(f.root, "no-soul", "profile.json"),
@@ -248,7 +290,6 @@ test("lookup rejects unusable SOUL bundles", async (t) => {
   await writeFile(join(f.root, "legacy-mixed", "SOUL.md"), "mixed");
   for (const id of [
     "blank",
-    "large",
     "no-soul",
     "inline-instructions",
     "legacy-mixed",

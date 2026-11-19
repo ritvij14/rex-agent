@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { lookupProfile, ProfileError } from "@rex/profiles";
+import { lookupProfile, ProfileError, SOUL_CUT_WARNINGS } from "@rex/profiles";
 import {
   runProfileRequest,
   createProposal,
@@ -627,8 +627,33 @@ test("SOUL-only profiles fail closed without shared configuration", async (t) =>
   assert.equal(f.received.length, 0);
 });
 
-test("maintenance preserves a SOUL-only profile and shared inheritance", async (t) => {
+test("an oversized SOUL is cut before inference and the result warns", async (t) => {
   const f = await fixture(t);
+  await mkdir(join(f.profilesRoot, "shared"));
+  await writeFile(
+    join(f.profilesRoot, "shared", "configuration.json"),
+    JSON.stringify({
+      version: 2,
+      model: { provider: "cli-proxy", id: "glm-5.3-flash-cloud" },
+      tools: { whitelist: ["read"], blacklist: [] },
+    }),
+  );
+  await mkdir(join(f.profilesRoot, "minimal"));
+  await writeFile(
+    join(f.profilesRoot, "minimal", "SOUL.md"),
+    "Kept persona.".padEnd(51200, " ") + "DROPPED_PERSONA_TAIL",
+  );
+  const result = await f.run("minimal");
+  assert.deepEqual(result.warnings, [SOUL_CUT_WARNINGS.own]);
+  const prompt = JSON.stringify(f.received.at(-1)!.messages);
+  assert.ok(prompt.includes("Kept persona."));
+  assert.ok(!prompt.includes("DROPPED_PERSONA_TAIL"));
+  assert.deepEqual((await f.run("coding")).warnings, []);
+});
+
+test("maintenance preserves a 50 KiB SOUL and shared inheritance", async (t) => {
+  const f = await fixture(t);
+  const revisedSoul = "Revised soul.".padEnd(51200, " ");
   await mkdir(join(f.profilesRoot, "shared"));
   const shared = JSON.stringify({
     version: 2,
@@ -641,13 +666,13 @@ test("maintenance preserves a SOUL-only profile and shared inheritance", async (
   f.replies.push(
     {
       tool: "revise_profile",
-      args: { id: "minimal", instructions: "Revised soul." },
+      args: { id: "minimal", instructions: revisedSoul },
     },
     { text: "drafted" },
   );
   await f.run("minimal", "Revise yourself", false, true);
   const draft = await reviewProposal(f.proposalsRoot, "minimal");
-  assert.equal(draft.definition.soul, "Revised soul.");
+  assert.equal(draft.definition.soul, revisedSoul);
   assert.equal(draft.definition.model, undefined);
   assert.equal(draft.definition.tools, undefined);
   assert.equal(
@@ -662,11 +687,11 @@ test("maintenance preserves a SOUL-only profile and shared inheritance", async (
   );
   assert.equal(
     (await lookupProfile(f.profilesRoot, "minimal")).soul,
-    "Revised soul.",
+    revisedSoul,
   );
   await f.run("minimal", "Fresh turn", true);
   const messages = f.received.at(-1)!.messages;
-  assert.ok(JSON.stringify(messages).includes("Revised soul."));
+  assert.ok(JSON.stringify(messages).includes(revisedSoul));
   assert.ok(!JSON.stringify(messages).includes("Original soul."));
   assert.equal(
     await readFile(
@@ -692,7 +717,7 @@ test("SOUL maintenance rejects invalid text and tool expansion without a draft",
   await writeFile(join(f.profilesRoot, "minimal", "SOUL.md"), "Original soul.");
   for (const change of [
     { instructions: " " },
-    { instructions: "é".repeat(8193) },
+    { instructions: "é".repeat(25601) },
     { whitelist: ["read", "write"] },
     { model: "" },
     { id: "coding", instructions: "Other profile." },

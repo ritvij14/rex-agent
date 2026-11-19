@@ -12,7 +12,60 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { provisionProfile } from "../lab/terminal/provision.ts";
-import { lookupProfile, loadSharedConfiguration } from "@rex/profiles";
+import {
+  lookupProfile,
+  loadSharedConfiguration,
+  SOUL_CUT_WARNINGS,
+  soulWarnings,
+} from "@rex/profiles";
+import {
+  bundleDigest,
+  sharedConfigurationDigest,
+} from "@rex/pi-profiles/proposals";
+
+test("provisioning copies cut personas, reports the cut and keeps approval digests", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "rex-provision-cut-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = join(root, "source");
+  const target = join(root, "target");
+  for (const id of ["coding", "shared"])
+    await mkdir(join(source, id), { recursive: true });
+  await mkdir(target);
+  await writeFile(
+    join(source, "coding", "SOUL.md"),
+    "Coding persona.".padEnd(60000, "x"),
+  );
+  await writeFile(
+    join(source, "shared", "configuration.json"),
+    JSON.stringify({
+      version: 2,
+      model: { provider: "cli-proxy", id: "synthetic-model" },
+    }),
+  );
+  await writeFile(
+    join(source, "shared", "REX_SOUL.md"),
+    "Common instructions.".padEnd(60000, "y"),
+  );
+  assert.deepEqual(await provisionProfile(source, target, "coding"), [
+    SOUL_CUT_WARNINGS.shared,
+    SOUL_CUT_WARNINGS.own,
+  ]);
+  const master = await lookupProfile(source, "coding");
+  const copy = await lookupProfile(target, "coding");
+  const copiedShared = await loadSharedConfiguration(join(target, "shared"));
+  assert.equal(Buffer.byteLength(copy.soul!), 51200);
+  assert.equal(copy.soul, master.soul);
+  assert.equal(
+    copiedShared.soul,
+    (await loadSharedConfiguration(join(source, "shared"))).soul,
+  );
+  assert.deepEqual(soulWarnings(copy, copiedShared), []);
+  assert.equal(bundleDigest(copy), bundleDigest(master));
+  assert.equal(
+    await sharedConfigurationDigest(target),
+    await sharedConfigurationDigest(source),
+  );
+});
 
 test("provisioning copies only selected validated config and shared policy", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "rex-provision-"));

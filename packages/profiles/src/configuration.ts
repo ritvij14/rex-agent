@@ -11,6 +11,22 @@ export const DEFAULT_TURN_LIMITS = Object.freeze({
   maxHistoryBytes: 131072,
 });
 
+export const SOUL_LIMIT = 50 * 1024;
+export const SOUL_CUT_WARNINGS = Object.freeze({
+  shared: `Shared REX_SOUL.md is larger than ${SOUL_LIMIT} bytes; only its first ${SOUL_LIMIT} bytes are used.`,
+  own: `SOUL.md is larger than ${SOUL_LIMIT} bytes; only its first ${SOUL_LIMIT} bytes are used.`,
+});
+
+export function soulWarnings(
+  profile: { readonly soulTruncated?: true },
+  shared?: { readonly soulTruncated?: true },
+): readonly string[] {
+  return Object.freeze([
+    ...(shared?.soulTruncated ? [SOUL_CUT_WARNINGS.shared] : []),
+    ...(profile.soulTruncated ? [SOUL_CUT_WARNINGS.own] : []),
+  ]);
+}
+
 function turnLimits(value: unknown): TurnLimits {
   if (!isPlainObject(value))
     throw new ProfileError("INVALID_PROFILE_DEFINITION");
@@ -239,6 +255,7 @@ export interface SharedConfiguration {
   readonly remoteMcpCatalog?: readonly RemoteMcpServer[];
   readonly resourceFiles?: readonly ResourceFile[];
   readonly soul?: string;
+  readonly soulTruncated?: true;
   readonly model?: ModelReference;
   readonly tools?: ToolPolicy;
   readonly limits?: TurnLimits;

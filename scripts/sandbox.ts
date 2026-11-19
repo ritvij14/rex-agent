@@ -262,6 +262,8 @@ export function main(args: string[]): number {
         maintain,
         modelOverride,
       });
+      for (const warning of result.warnings)
+        console.error(`Warning: ${warning}`);
       if (result.status !== 0) {
         console.error(
           result.stderr.includes("Profile response was truncated")

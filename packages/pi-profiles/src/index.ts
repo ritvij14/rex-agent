@@ -24,6 +24,7 @@ import {
   ProfileError,
   ProfileRuntime,
   resolveEffectiveProfile,
+  soulWarnings,
   type LocalMcpServer,
   type SharedConfiguration,
 } from "@rex/profiles";
@@ -670,6 +671,7 @@ export async function runProfileRequest(options: ProfileRequestOptions) {
               profileId: profile.id,
               model: selection.id,
               attempts,
+              warnings: soulWarnings(profile, shared),
               toolNames: session.getActiveToolNames(),
               denied,
               sessionFile: session.sessionFile,
